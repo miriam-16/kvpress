@@ -18,6 +18,7 @@ from zero_scrolls.calculate_metrics import calculate_metrics as zero_scrolls_sco
 
 from kvpress import (
     AdaKVPress,
+    ChunkKVPress,
     CriticalAdaKVPress,
     CriticalKVPress,
     DuoAttentionPress,
@@ -66,6 +67,7 @@ PRESS_DICT = {
     "tova": TOVAPress(),
     "duo_attention": DuoAttentionPress(),
     "finch": FinchPress(),
+    "chunkkv": ChunkKVPress(press=SnapKVPress(), chunk_length=20),
 }
 
 
