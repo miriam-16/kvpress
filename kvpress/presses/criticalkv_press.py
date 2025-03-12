@@ -8,8 +8,8 @@ import torch
 from transformers.models.llama.modeling_llama import repeat_kv
 
 from kvpress.presses.base_press import BasePress
-from kvpress.presses.scorer_press import ScorerPress
 from kvpress.presses.expected_attention_press import ExpectedAttentionPress
+from kvpress.presses.scorer_press import ScorerPress
 
 logger = logging.getLogger(__name__)
 

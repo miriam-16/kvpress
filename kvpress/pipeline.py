@@ -13,8 +13,9 @@ from transformers.pipelines.base import GenericTensor
 
 from kvpress.presses.base_press import BasePress
 from kvpress.presses.key_rerotation_press import KeyRerotationPress
-from kvpress.presses.observed_attention_press import ObservedAttentionPress
 from kvpress.presses.per_layer_compression_press import PerLayerCompressionPress
+from kvpress.presses.observed_attention_press import ObservedAttentionPress
+
 
 logger = logging.getLogger(__name__)
 
