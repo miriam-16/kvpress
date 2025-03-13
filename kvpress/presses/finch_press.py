@@ -21,45 +21,58 @@ class FinchPress(ScorerPress):
     https://github.com/FasterDecoding/SnapKV/blob/main/snapkv/monkeypatch/snapkv_utils.py#L24
     """
 
+    #window_size: int = 64
     compression_ratio: float = 0.0
-    window_size: int = 64
     kernel_size: int = 5
 
-    @staticmethod
-    def compute_window_attention(module, hidden_states, keys, window_size, position_embeddings):
-        """
-        Compute the last window_size queries and associated attention weights for the first q_len - window_size keys.
-        """
+    separator_index: int = 5 # for starting, assume we have it fixed
 
+    @staticmethod
+    def compute_finch_attention(module, hidden_states, keys, separator_index, position_embeddings):
+        
+        """ apply Finch"""
+
+        # keep it as it is
         bsz, q_len, _ = hidden_states.shape
         num_heads = module.config.num_attention_heads
         head_dim = module.head_dim
         num_key_value_groups = num_heads // module.config.num_key_value_heads
 
-        # Get last window_size queries
+    
+
+        # Get question queries
         if hasattr(module, "q_proj"):
-            query_states = module.q_proj(hidden_states[:, -window_size:])
+            query_states = module.q_proj(hidden_states[:, separator_index:])
         elif hasattr(module, "qkv_proj"):
-            qkv = module.qkv_proj(hidden_states[:, -window_size:])
+            qkv = module.qkv_proj(hidden_states[:, separator_index:])
             query_states = qkv[..., : num_heads * head_dim]
         else:
-            raise NotImplementedError(f"SnapKV not yet implemented for {module.__class__}.")
+            raise NotImplementedError(f"Finch not yet implemented for {module.__class__}.")
 
-        query_states = query_states.view(bsz, window_size, num_heads, head_dim).transpose(1, 2)
 
-        # Apply RoPE
+        # TODO: still have to modify this part!!
+        #query_states = query_states.view(bsz, window_size, num_heads, head_dim).transpose(1, 2)
+
+        query_dimension=hidden_states.shape[1]-separator_index-1 #adjust for excluding the separator token
+        query_states = query_states.view(bsz, query_dimension, num_heads, head_dim).transpose(1, 2)
+
+        # Apply RoPE, considering queries only
         cos, sin = position_embeddings
-        cos, sin = cos[:, -window_size:], sin[:, -window_size:]
+        cos, sin = cos[:, separator_index:], sin[:, separator_index:]
         query_states = (query_states * cos.unsqueeze(1)) + (rotate_half(query_states) * sin.unsqueeze(1))
 
-        # Compute attention for first q_len - window_size tokens
+        # Compute attention for context tokens
         key_states = repeat_kv(keys, num_key_value_groups)
         attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(head_dim)
-        attention_mask = torch.ones_like(attn_weights) * float("-inf")
+
+        # Apply mask to avoid attending to future tokens, is it really necessary?
+        """attention_mask = torch.ones_like(attn_weights) * float("-inf")
         attention_mask = torch.triu(attention_mask, diagonal=q_len - window_size + 1)
-        attn_weights += attention_mask
+        attn_weights += attention_mask"""
+
+
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
-        attn_weights = attn_weights[..., :-window_size]
+        attn_weights = attn_weights[..., :separator_index]
 
         return attn_weights
 
@@ -76,23 +89,27 @@ class FinchPress(ScorerPress):
         bsz, num_key_value_heads, q_len, _ = keys.shape
         num_key_value_groups = module.config.num_attention_heads // num_key_value_heads
 
-        assert q_len > self.window_size, "Query length should be greater than the window size"
+        #assert q_len > self.window_size, "Query length should be greater than the window size"
 
         if attentions is not None:
-            attn_weights = attentions[..., -self.window_size :, : -self.window_size]
+            # keep only attentions between context (first part) and question (last part)
+            attn_weights = attentions[..., self.separator_index:, :self.separator_index]
         else:
-            attn_weights = self.compute_window_attention(
-                module, hidden_states, keys, self.window_size, kwargs["position_embeddings"]
+            attn_weights = self.compute_finch_attention(
+                module, hidden_states, keys,self.separator_index, kwargs["position_embeddings"]
             )
 
-        scores = attn_weights.mean(dim=-2)
-        scores = F.avg_pool1d(scores, kernel_size=self.kernel_size, padding=self.kernel_size // 2, stride=1)
+        #TODO : should we normalize as Giulio did?
 
+        scores = attn_weights.sum(dim=-2)
+        
+        #scores = F.avg_pool1d(scores, kernel_size=self.kernel_size, padding=self.kernel_size // 2, stride=1)
         # Average per grioup (https://github.com/FasterDecoding/SnapKV/issues/22)
-        scores = scores.view(bsz, num_key_value_heads, num_key_value_groups, q_len - self.window_size)
-        scores = scores.mean(2)
+
+        scores = scores.view(bsz, num_key_value_heads, num_key_value_groups, self.separator_index)
+        scores = scores.sum(2)
 
         # Add back the observation window. Use max score to make sure the window is not pruned.
-        scores = F.pad(scores, (0, self.window_size), value=scores.max().item())
+        #scores = F.pad(scores, (0, self.window_size), value=scores.max().item())
 
         return scores
