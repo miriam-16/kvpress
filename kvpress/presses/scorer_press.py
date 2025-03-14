@@ -54,13 +54,19 @@ class ScorerPress(BasePress):
 
         if self.compression_ratio == 0:
             return keys, values
+        
 
         # Compute scores
-        scores = self.score(module, hidden_states, keys, values, attentions, kwargs)
-
+        scores = self.score(module, hidden_states, keys, values, None, kwargs)
         # Get indices of KV pairs with the lowest scores
         q_len = hidden_states.shape[1]
-        n_kept = int(q_len * (1 - self.compression_ratio))
+
+        #TODO: remove question part
+        to_remove=14
+
+        n_kept = int((q_len-to_remove) * (1 - self.compression_ratio))
+        
+
         indices = scores.topk(n_kept, dim=-1).indices
         indices = indices.unsqueeze(-1).expand(-1, -1, -1, module.head_dim)
 
