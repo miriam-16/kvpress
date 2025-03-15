@@ -23,9 +23,11 @@ class FinchPress(ScorerPress):
 
     #window_size: int = 64
     compression_ratio: float = 0.0
-    kernel_size: int = 5
+    #kernel_size: int = 5
 
-    separator_index: int = 12 # for starting, assume we have it fixed
+    #separator_index: int = 35 # for starting, assume we have it fixed
+
+    condition_len: int=None
 
     @staticmethod
     def compute_finch_attention(module, hidden_states, keys, separator_index, position_embeddings):
@@ -42,9 +44,9 @@ class FinchPress(ScorerPress):
 
         # Get question queries
         if hasattr(module, "q_proj"):
-            #print("inside q_proj")
+            print("inside q_proj")
             query_states = module.q_proj(hidden_states[:, separator_index:])
-            #print("query states dimension: ", query_states.shape)
+            print("query states dimension: ", query_states.shape)
         elif hasattr(module, "qkv_proj"):
             #print("inside qkv_proj")
             qkv = module.qkv_proj(hidden_states[:, separator_index:])
@@ -102,19 +104,31 @@ class FinchPress(ScorerPress):
         bsz, num_key_value_heads, q_len, _ = keys.shape
         num_key_value_groups = module.config.num_attention_heads // num_key_value_heads
 
+        print(keys.shape)
+        print(values.shape)
+        query_states = module.q_proj(hidden_states)
+        print("query states dimension: ", query_states.shape)
+        print(attentions.shape)
         #print(num_key_value_groups)
 
         #assert q_len > self.window_size, "Query length should be greater than the window size"
 
+        """torch.Size([1, 3, 44, 64])
+        torch.Size([1, 3, 44, 64])
+        query states dimension:  torch.Size([1, 44, 576])
+        torch.Size([1, 9, 44, 44])"""
+
         if attentions is not None:
-            #print("attention not none, simply slice")
+            print("attention not none, simply slice")
             # keep only attentions between context (first part) and question (last part)
-            attn_weights = attentions[..., self.separator_index:, :self.separator_index]
-            #print(attn_weights.shape)
+            attn_weights = attentions[..., -self.condition_len:, :-self.condition_len]
+            print(attn_weights.shape)
         else:
+            print("attention  none, compute")
             attn_weights = self.compute_finch_attention(
                 module, hidden_states, keys,self.separator_index, kwargs["position_embeddings"]
             )
+
             #1x9x14x12
 
         #TODO : should we normalize as Giulio did?
@@ -124,10 +138,10 @@ class FinchPress(ScorerPress):
         #scores = F.avg_pool1d(scores, kernel_size=self.kernel_size, padding=self.kernel_size // 2, stride=1)
         # Average per grioup (https://github.com/FasterDecoding/SnapKV/issues/22)
 
-        scores = scores.view(bsz, num_key_value_heads, num_key_value_groups, self.separator_index)
+        scores = scores.view(bsz, num_key_value_heads, num_key_value_groups, q_len - self.condition_len)
         scores = scores.sum(2)
 
         # Add back the observation window. Use max score to make sure the window is not pruned.
-        #scores = F.pad(scores, (0, self.window_size), value=scores.max().item())
+        scores = F.pad(scores, (0, self.condition_len), value=scores.max().item())
 
         return scores

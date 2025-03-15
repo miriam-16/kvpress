@@ -15,6 +15,7 @@ from kvpress.presses.base_press import BasePress
 from kvpress.presses.key_rerotation_press import KeyRerotationPress
 from kvpress.presses.per_layer_compression_press import PerLayerCompressionPress
 from kvpress.presses.observed_attention_press import ObservedAttentionPress
+from kvpress.presses.finch_press import FinchPress
 
 
 logger = logging.getLogger(__name__)
@@ -158,9 +159,19 @@ class KVPressTextGenerationPipeline(Pipeline):
         list[str]
             A list of generated answers.
         """
-
         context_ids = input_tensors["context_ids"].to(self.model.device)
         context_length = context_ids.shape[1]
+
+        #customize based on finchPress
+        if isinstance(press,FinchPress):
+            question_ids=input_tensors["questions_ids"][0].to(self.model.device)
+            context_ids= torch.cat((context_ids,question_ids),dim=1)
+            question_len=len(question_ids)
+            press.condition_len=question_len
+
+            question_ids = [
+            self.tokenizer.encode("", return_tensors="pt", add_special_tokens=False)]
+            print(f"finch question ids: {question_ids}")
 
         # Prefilling using the press on the context
         if cache is None:
