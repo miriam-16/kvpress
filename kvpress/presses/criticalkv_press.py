@@ -49,7 +49,7 @@ class CriticalKVPress(ScorerPress):
         # Future kernel fusion optimization could eliminate this intermediate variables to enhance performance.
         head_WoV_norm_list = []
         for head in range(V.size(1)):
-            head_WoV = V[: , head, : , ...].matmul(Wo[head, ...].unsqueeze(0))
+            head_WoV = V[:, head, :, ...].matmul(Wo[head, ...].unsqueeze(0))
             head_WoV_norm = torch.norm(head_WoV, p=1, dim=-1)
             head_WoV_norm_list.append(head_WoV_norm)
 

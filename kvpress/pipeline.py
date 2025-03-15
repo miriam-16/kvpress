@@ -12,11 +12,10 @@ from transformers.pipelines import PIPELINE_REGISTRY
 from transformers.pipelines.base import GenericTensor
 
 from kvpress.presses.base_press import BasePress
-from kvpress.presses.key_rerotation_press import KeyRerotationPress
-from kvpress.presses.per_layer_compression_press import PerLayerCompressionPress
-from kvpress.presses.observed_attention_press import ObservedAttentionPress
 from kvpress.presses.finch_press import FinchPress
-
+from kvpress.presses.key_rerotation_press import KeyRerotationPress
+from kvpress.presses.observed_attention_press import ObservedAttentionPress
+from kvpress.presses.per_layer_compression_press import PerLayerCompressionPress
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +161,7 @@ class KVPressTextGenerationPipeline(Pipeline):
         context_ids = input_tensors["context_ids"].to(self.model.device)
         context_length = context_ids.shape[1]
 
+<<<<<<< HEAD
         #customize based on finchPress
         if isinstance(press,FinchPress):
             question_ids=input_tensors["questions_ids"][0].to(self.model.device)
@@ -172,6 +172,17 @@ class KVPressTextGenerationPipeline(Pipeline):
             question_ids = [
             self.tokenizer.encode("", return_tensors="pt", add_special_tokens=False)]
             print(f"question_len {question_len}")
+=======
+        # customize based on finchPress
+        if isinstance(press, FinchPress):
+            # finch press cannot be done with multiple questions
+            assert len(input_tensors["questions_ids"]) == 1, "Finch press cannot be done with multiple questions"
+            question_ids = input_tensors["questions_ids"][0].to(self.model.device)
+            context_ids = torch.cat((context_ids, question_ids), dim=1)
+            question_len = len(question_ids[0])
+            press.condition_len = question_len
+            input_tensors["questions_ids"][0] = question_ids[:, -1:]
+>>>>>>> e68f742 (fix question len, adjusted the question ids for generation.)
 
         # Prefilling using the press on the context
         if cache is None:

@@ -1,7 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 1993-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from kvpress.presses.finch_press import FinchPress
 from kvpress.attention_patch import patch_attention_functions
 from kvpress.pipeline import KVPressTextGenerationPipeline
 from kvpress.presses.adakv_press import AdaKVPress
@@ -11,6 +10,7 @@ from kvpress.presses.composed_press import ComposedPress
 from kvpress.presses.criticalkv_press import CriticalAdaKVPress, CriticalKVPress
 from kvpress.presses.duo_attention_press import DuoAttentionPress
 from kvpress.presses.expected_attention_press import ExpectedAttentionPress
+from kvpress.presses.finch_press import FinchPress
 from kvpress.presses.key_rerotation_press import KeyRerotationPress
 from kvpress.presses.knorm_press import KnormPress
 from kvpress.presses.observed_attention_press import ObservedAttentionPress
