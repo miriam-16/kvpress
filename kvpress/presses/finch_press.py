@@ -75,8 +75,23 @@ class FinchPress(ScorerPress):
         print("attn_weights after mask: ", attn_weights)
 
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
-        # print("attn_weights dimension: ", attn_weights.shape)
-        attn_weights = attn_weights[..., :separator_index]
+        print("attn_weights dimension after softmax: ", attn_weights.shape)
+
+        # apply normalization
+
+        tol = 1e-8
+
+        print(attn_weights.to(torch.float32))
+        binary_mask = (torch.abs(attn_weights.to(torch.float32)) < tol).to(torch.float32)
+        print(binary_mask.shape)
+        print(binary_mask)
+        non_zero_counts = binary_mask.sum(dim=3, keepdim=True)
+        non_zero_counts = torch.clamp_min(non_zero_counts, 1.0).to(attn_weights.dtype)
+        attn_weights = attn_weights / non_zero_counts
+
+
+
+        attn_weights = attn_weights[..., :-condition_len]
 
         # print("attn_weights dimension considering only context: ", attn_weights.shape)
 
