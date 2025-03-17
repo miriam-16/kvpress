@@ -166,12 +166,12 @@ class KVPressTextGenerationPipeline(Pipeline):
         if isinstance(press,FinchPress):
             question_ids=input_tensors["questions_ids"][0].to(self.model.device)
             context_ids= torch.cat((context_ids,question_ids),dim=1)
-            question_len=len(question_ids)
+            question_len=len(question_ids[0])
             press.condition_len=question_len
 
             question_ids = [
             self.tokenizer.encode("", return_tensors="pt", add_special_tokens=False)]
-            print(f"finch question ids: {question_ids}")
+            print(f"question_len {question_len}")
 
         # Prefilling using the press on the context
         if cache is None:
