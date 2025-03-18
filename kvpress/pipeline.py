@@ -174,13 +174,17 @@ class KVPressTextGenerationPipeline(Pipeline):
             print(f"question_len {question_len}")
 =======
         # customize based on finchPress
-        if isinstance(press, FinchPress):
+        if isinstance(press, FinchPress) or isinstance(press.press, FinchPress):
             # finch press cannot be done with multiple questions
             assert len(input_tensors["questions_ids"]) == 1, "Finch press cannot be done with multiple questions"
             question_ids = input_tensors["questions_ids"][0].to(self.model.device)
             context_ids = torch.cat((context_ids, question_ids[:, :-1]), dim=1)
+            print(self.tokenizer.decode(context_ids[0]))
             question_len = len(question_ids[:, :-1][0])
-            press.condition_len = question_len
+            if isinstance(press, FinchPress):
+                press.condition_len = question_len
+            else:
+                press.press.condition_len = question_len
 
             input_tensors["questions_ids"][0] = question_ids[:, -1:]
 <<<<<<< HEAD

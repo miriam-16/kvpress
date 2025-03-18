@@ -31,8 +31,7 @@ class FinchPress(ScorerPress):
         non_zero_counts = torch.clamp_min(non_zero_counts, 1.0).to(attn_weights.dtype)
         return non_zero_counts
 
-    @staticmethod
-    def compute_finch_attention(module, hidden_states, keys, condition_len, position_embeddings):
+    def compute_finch_attention(self, module, hidden_states, keys, condition_len, position_embeddings):
 
         """Compute the last condition_len queries (question) and associated attention weights for the first q_len - condition_len keys (context).
         """
@@ -66,7 +65,7 @@ class FinchPress(ScorerPress):
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
 
         # Finch incorporates a normalization step, ensuring that each token’s relevance is equally evaluated.
-        non_zero_counts = compute_normalization_factors(attention_mask, attn_weights)
+        non_zero_counts = self.compute_normalization_factors(attention_mask, attn_weights)
         attn_weights = attn_weights * non_zero_counts
         
         attn_weights = attn_weights[..., :-condition_len]
