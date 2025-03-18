@@ -181,8 +181,16 @@ class KVPressTextGenerationPipeline(Pipeline):
             context_ids = torch.cat((context_ids, question_ids), dim=1)
             question_len = len(question_ids[0])
             press.condition_len = question_len
+            #print("print input tensor before giulio: ", input_tensors["questions_ids"])
+
             input_tensors["questions_ids"][0] = question_ids[:, -1:]
+<<<<<<< HEAD
 >>>>>>> e68f742 (fix question len, adjusted the question ids for generation.)
+=======
+            #input_tensors["questions_ids"][0] = question_ids[:, :-1] #proposed fix 
+            
+            #print("print input tensor after giulio: ", input_tensors["questions_ids"])
+>>>>>>> f0197c0 (clean FinchPress)
 
         # Prefilling using the press on the context
         if cache is None:
