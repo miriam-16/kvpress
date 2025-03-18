@@ -25,11 +25,17 @@ class FinchPress(ScorerPress):
     condition_len: int = None
 
     @staticmethod
+    def compute_normalization_factors(attention_mask, attn_weights, tol=1e-8):
+        binary_mask = (torch.abs(attention_mask.to(torch.float32)) < tol).to(torch.float32)
+        non_zero_counts = binary_mask.sum(dim=3, keepdim=True)
+        non_zero_counts = torch.clamp_min(non_zero_counts, 1.0).to(attn_weights.dtype)
+        return non_zero_counts
+
+    @staticmethod
     def compute_finch_attention(module, hidden_states, keys, condition_len, position_embeddings):
 
         """Compute the last condition_len queries (question) and associated attention weights for the first q_len - condition_len keys (context).
         """
-
         bsz, q_len, _ = hidden_states.shape
         num_heads = module.config.num_attention_heads
         head_dim = module.head_dim
@@ -59,23 +65,9 @@ class FinchPress(ScorerPress):
         attn_weights += attention_mask
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
 
-        """# Debug print
-        print("Computed key states dim: ", key_states.shape)
-        print("Computed query states dim ", query_states.shape)
-        print("Computed attn_weights dim : ", attn_weights.shape)"""
-
-        # plot for attention weights matrix
-        """ print_matrix = attn_weights[0,0,::].numpy()
-        plt.imshow(print_matrix, cmap='viridis', aspect='auto')
-        plt.show() """
-
-
         # Finch incorporates a normalization step, ensuring that each token’s relevance is equally evaluated.
-        tol = 1e-8
-        binary_mask = (torch.abs(attention_mask.to(torch.float32)) < tol).to(torch.float32)
-        non_zero_counts = binary_mask.sum(dim=3, keepdim=True)
-        non_zero_counts = torch.clamp_min(non_zero_counts, 1.0).to(attn_weights.dtype)
-        attn_weights = attn_weights / non_zero_counts
+        non_zero_counts = compute_normalization_factors(attention_mask, attn_weights)
+        attn_weights = attn_weights * non_zero_counts
         
         attn_weights = attn_weights[..., :-condition_len]
 
@@ -93,32 +85,18 @@ class FinchPress(ScorerPress):
 
         bsz, num_key_value_heads, q_len, _ = keys.shape
         num_key_value_groups = module.config.num_attention_heads // num_key_value_heads
-
-        """# Debug print
-        print("Key states dim: ", keys.shape)
-        print("Values states dim: ", values.shape)
-        query_states = module.q_proj(hidden_states)
-        print("Query states dim: ", query_states.shape)
-        if attentions is not None:
-            print("Attentions dim: ",attentions.shape)"""
-
-
         if attentions is not None:
             attn_weights = attentions[..., -self.condition_len :, : -self.condition_len]
+            non_zero_counts = self.compute_normalization_factors(kwargs["attention_mask"][..., -self.condition_len :, :q_len], attn_weights)
+            attn_weights = attn_weights * non_zero_counts
         else:
             attn_weights = self.compute_finch_attention(
-                module, hidden_states, keys, self.separator_index, kwargs["position_embeddings"]
+                module, hidden_states, keys, self.condition_len, kwargs["position_embeddings"]
             )
-
-        #print(attn_weights.shape) #check result of attention weights
-
         scores = attn_weights.sum(dim=-2)
         scores = scores.view(bsz, num_key_value_heads, num_key_value_groups, q_len - self.condition_len)
         scores = scores.sum(dim=2)
-
-        # Add back the condition window. Use max score to make sure the condition is not pruned.
-        scores = F.pad(scores, (0, self.condition_len - 1), value=scores.max().item())
-
-        #print("Final result dimension: ", scores.shape)
+        # Add back the observation window. Use max score to make sure the window is not pruned.
+        scores = F.pad(scores, (0, self.condition_len), value=scores.max().item())
 
         return scores
