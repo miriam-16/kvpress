@@ -32,6 +32,7 @@ class FinchPress(ScorerPress):
         binary_mask = (torch.abs(attention_mask.to(torch.float32)) < tol).to(torch.float32)
         non_zero_counts = binary_mask.sum(dim=3, keepdim=True)
         non_zero_counts = torch.clamp_min(non_zero_counts, 1.0).to(attn_weights.dtype)
+
         return non_zero_counts
 
     def compute_finch_attention(self, module, hidden_states, keys, condition_len, position_embeddings):
@@ -66,7 +67,7 @@ class FinchPress(ScorerPress):
         key_states = repeat_kv(keys, num_key_value_groups)
         attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(head_dim)
         attention_mask = torch.ones_like(attn_weights) * float("-inf")
-        attention_mask = torch.triu(attention_mask, diagonal=q_len - condition_len + 1)
+        attention_mask = torch.triu(attention_mask, diagonal=key_states.shape[-2] - condition_len + 1)
         attn_weights += attention_mask
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
 
