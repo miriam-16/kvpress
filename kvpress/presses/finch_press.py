@@ -25,7 +25,7 @@ class FinchPress(ScorerPress):
 
     compression_ratio: float = 0.0
     condition_len: int = None
-    split_size: int = 2
+    split_size: int = 3
 
     @staticmethod
     def compute_normalization_factors(attention_mask, attn_weights, tol=1e-8):
@@ -162,9 +162,13 @@ class FinchPress(ScorerPress):
         # Get indices of KV pairs with the lowest scores
         q_len = hidden_states.shape[1]
 
-        n_kept = int(q_len * (1 - self.compression_ratio)) + (scores.shape[-1] - q_len)
+        context_length = kwargs["context_length"]
+        n_kept = int(q_len * (1 - self.compression_ratio)) + (scores.shape[-1] - q_len) if q_len == context_length // self.split_size + self.condition_len else int(context_length * (1 - self.compression_ratio))
+
+        #n_kept = int(q_len * (1 - self.compression_ratio)) + (scores.shape[-1] - q_len)
+
         if module.layer_idx == 0:
-            print("n_kept is ", n_kept, "(cache + compression(chunk + question)")
+            print("q_len is ", q_len,"n_kept is " , n_kept, "(cache + compression(chunk + question)")
         indices = scores.topk(n_kept, dim=-1).indices
         new_cos, new_sin = self._rerotate_cos_sin(keys, module.rotary_emb.inv_freq, indices)
         indices = indices.unsqueeze(-1).expand(-1, -1, -1, module.head_dim)
@@ -245,6 +249,8 @@ class FinchPress(ScorerPress):
 
                 # Calculate the total number of context tokens.
                 context_length = context_ids.shape[1]
+                kwargs["context_length"] = context_length
+
                 # Determine the chunk size so that we split context_ids into exactly split_size chunks.
                 chunk_size = context_length // self.split_size
                 last_output = None
