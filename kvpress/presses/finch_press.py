@@ -164,7 +164,7 @@ class FinchPress(ScorerPress):
 
         context_length = kwargs["context_length"]
         #n_kept = int(q_len * (1 - self.compression_ratio)) + (scores.shape[-1] - q_len)
-        n_kept = int(q_len * (1 - self.compression_ratio)) + (scores.shape[-1] - q_len) if kwargs["split_idx"]!=self.split_size-1 else int(context_length * (1 - self.compression_ratio))
+        n_kept = int(q_len * (1 - self.compression_ratio)) + (scores.shape[-1] - q_len) if kwargs["split_idx"]!=self.split_size-1 else int(context_length * (1 - self.compression_ratio) + self.condition_len)
 
         if module.layer_idx == 0:
             print("q_len is ", q_len,"n_kept is " , n_kept, "(cache + compression(chunk + question)")
