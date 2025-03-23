@@ -174,7 +174,7 @@ class KVPressTextGenerationPipeline(Pipeline):
             print(f"question_len {question_len}")
 =======
         # customize based on finchPress
-        if isinstance(press, FinchPress) or isinstance(press.press, FinchPress):
+        if isinstance(press, FinchPress) or isinstance(getattr(press, "press", None), FinchPress):
             # finch press cannot be done with multiple questions
             assert len(input_tensors["questions_ids"]) == 1, "Finch press cannot be done with multiple questions"
             question_ids = input_tensors["questions_ids"][0].to(self.model.device)

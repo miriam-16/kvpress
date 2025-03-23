@@ -163,9 +163,8 @@ class FinchPress(ScorerPress):
         q_len = hidden_states.shape[1]
 
         context_length = kwargs["context_length"]
-        n_kept = int(q_len * (1 - self.compression_ratio)) + (scores.shape[-1] - q_len) if q_len == context_length // self.split_size + self.condition_len else int(context_length * (1 - self.compression_ratio))
-
         #n_kept = int(q_len * (1 - self.compression_ratio)) + (scores.shape[-1] - q_len)
+        n_kept = int(q_len * (1 - self.compression_ratio)) + (scores.shape[-1] - q_len) if kwargs["split_idx"]!=self.split_size-1 else int(context_length * (1 - self.compression_ratio))
 
         if module.layer_idx == 0:
             print("q_len is ", q_len,"n_kept is " , n_kept, "(cache + compression(chunk + question)")
@@ -261,6 +260,7 @@ class FinchPress(ScorerPress):
                 print("Number of chunks:", self.split_size)
 
                 for i in range(self.split_size):
+                    kwargs["split_idx"]=i
                     start = i * chunk_size
                     # For the last chunk, include any remaining tokens.
                     end = start + chunk_size if i < self.split_size - 1 else context_length
