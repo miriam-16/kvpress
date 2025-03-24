@@ -19,13 +19,21 @@ from kvpress.presses.scorer_press import ScorerPress
 @dataclass
 class FinchPress(ScorerPress):
     """
-    Finch use the attention of the concatenated question of the user to estimate the importance
-    of the context elements.
+    Finch uses the attention information between the prompt and the document chunk to dynamically identify the most relevant KV pairs across different layers.
+    This information then is stored in the KV cache for the processing of the next input chunk
+    (https://direct.mit.edu/tacl/article/doi/10.1162/tacl_a_00716/125280)
+
+    Parameters
+    ----------
+    condition_len : int
+        The number of tokens in the prompt.
+    split_size : int
+        The number of chunks to split the context into.
     """
 
     compression_ratio: float = 0.0
     condition_len: int = None
-    split_size: int = 3
+    split_size: int = 2
 
     @staticmethod
     def compute_normalization_factors(attention_mask, attn_weights, tol=1e-8):
@@ -42,11 +50,6 @@ class FinchPress(ScorerPress):
         head_dim = module.head_dim
         num_key_value_groups = num_heads // module.config.num_key_value_heads
 
-        # print("q_len is ", q_len)
-        # print("condition_len is ", condition_len)
-        # print("num_heads is ", num_heads)
-        # print("head_dim is ", head_dim)
-
         # Get question queries
         if hasattr(module, "q_proj"):
             query_states = module.q_proj(hidden_states[:, -condition_len:])
@@ -55,7 +58,7 @@ class FinchPress(ScorerPress):
             query_states = qkv[..., : num_heads * head_dim]
         else:
             raise NotImplementedError(f"Finch not yet implemented for {module.__class__}.")
-        # print("query_states shape is ", query_states.shape)
+
         query_states = query_states.view(bsz, condition_len, num_heads, head_dim).transpose(1, 2)
 
         # Apply RoPE, considering queries only
@@ -74,9 +77,7 @@ class FinchPress(ScorerPress):
         # Finch incorporates a normalization step, ensuring that each token’s relevance is equally evaluated.
         non_zero_counts = self.compute_normalization_factors(attention_mask, attn_weights)
         attn_weights = attn_weights * non_zero_counts
-
         attn_weights = attn_weights[..., :-condition_len]
-
         return attn_weights
 
     def score(
@@ -93,32 +94,20 @@ class FinchPress(ScorerPress):
         num_key_value_groups = module.config.num_attention_heads // num_key_value_heads
 
         if attentions is not None:
-
             attn_weights = attentions[..., -self.condition_len :, : -self.condition_len]
             non_zero_counts = self.compute_normalization_factors(
                 kwargs["attention_mask"][..., -self.condition_len :, :q_len], attn_weights
             )
-            if module.layer_idx == 0:
-                print("attentions are: ", attentions.shape)
-                print("attn_weights are: ", attn_weights.shape)
             attn_weights = attn_weights * non_zero_counts
         else:
             attn_weights = self.compute_finch_attention(
                 module, hidden_states, keys, self.condition_len, kwargs["position_embeddings"]
             )
         scores = attn_weights.sum(dim=-2)
-        if module.layer_idx == 0:
-            print("scores sum over question: ", scores.shape)
         scores = scores.view(bsz, num_key_value_heads, num_key_value_groups, q_len - self.condition_len)
-        if module.layer_idx == 0:
-            print("scores reshaped: ", scores.shape)
         scores = scores.sum(dim=2)
-        if module.layer_idx == 0:
-            print("scores sum over heads: ", scores.shape)
         # Add back the observation window. Use max score to make sure the window is not pruned.
         scores = F.pad(scores, (0, self.condition_len), value=scores.max().item())
-        if module.layer_idx == 0:
-            print("scores padded: ", scores.shape)
         return scores
 
     @staticmethod
@@ -144,7 +133,6 @@ class FinchPress(ScorerPress):
             sin = emb.sin().contiguous()
         return cos.to(dtype=dtype), sin.to(dtype=dtype)
 
-
     def compress(
         self,
         module: nn.Module,
@@ -159,15 +147,15 @@ class FinchPress(ScorerPress):
 
         # Compute scores from base press
         scores = self.score(module, hidden_states, keys, values, attentions, kwargs)
-        # Get indices of KV pairs with the lowest scores
-        q_len = hidden_states.shape[1]
 
         context_length = kwargs["context_length"]
-        #n_kept = int(q_len * (1 - self.compression_ratio)) + (scores.shape[-1] - q_len)
-        #n_kept = int(q_len * (1 - self.compression_ratio)) + (scores.shape[-1] - q_len) if kwargs["split_idx"]!=self.split_size-1 else int(context_length * (1 - self.compression_ratio) + self.condition_len)
-        n_kept = int((scores.shape[-1]-self.condition_len) * (1 - self.compression_ratio))+self.condition_len if kwargs["split_idx"]!=self.split_size-1 else int(context_length * (1 - self.compression_ratio)) + self.condition_len
-        if module.layer_idx == 0:
-            print("q_len is ", q_len,"n_kept is " , n_kept, "(cache + compression(chunk + question)")
+        last_iteration = kwargs["split_idx"] == self.split_size - 1
+
+        if last_iteration:
+            n_kept = int(context_length * (1 - self.compression_ratio)) + self.condition_len
+        else:
+            n_kept = int((scores.shape[-1] - self.condition_len) * (1 - self.compression_ratio)) + self.condition_len
+
         indices = scores.topk(n_kept, dim=-1).indices
         new_cos, new_sin = self._rerotate_cos_sin(keys, module.rotary_emb.inv_freq, indices)
         indices = indices.unsqueeze(-1).expand(-1, -1, -1, module.head_dim)
@@ -260,17 +248,15 @@ class FinchPress(ScorerPress):
                 print("Number of chunks:", self.split_size)
 
                 for i in range(self.split_size):
-                    kwargs["split_idx"]=i
+                    kwargs["split_idx"] = i
                     start = i * chunk_size
                     # For the last chunk, include any remaining tokens.
                     end = start + chunk_size if i < self.split_size - 1 else context_length
-
 
                     # Get the current chunk from context_ids and combine with the question tokens.
                     context_chunk = context_ids[:, start:end]
 
                     kwargs["input_ids"] = torch.cat((context_chunk, question_ids), dim=1)
-                    print(f"Processing chunk {i} of len: ", kwargs["input_ids"].shape[1], "(context chunk + question)")
 
                     if attention_mask is not None:
                         context_attention_mask_chunk = context_attention_mask[:, start:end]
