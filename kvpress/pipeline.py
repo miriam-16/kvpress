@@ -161,41 +161,15 @@ class KVPressTextGenerationPipeline(Pipeline):
         context_ids = input_tensors["context_ids"].to(self.model.device)
         context_length = context_ids.shape[1]
 
-<<<<<<< HEAD
-        #customize based on finchPress
-        if isinstance(press,FinchPress):
-            question_ids=input_tensors["questions_ids"][0].to(self.model.device)
-            context_ids= torch.cat((context_ids,question_ids),dim=1)
-            question_len=len(question_ids[0])
-            press.condition_len=question_len
-
-            question_ids = [
-            self.tokenizer.encode("", return_tensors="pt", add_special_tokens=False)]
-            print(f"question_len {question_len}")
-=======
         # customize based on finchPress
-        if isinstance(press, FinchPress) or isinstance(getattr(press, "press", None), FinchPress):
+        if isinstance(press, FinchPress):
             # finch press cannot be done with multiple questions
             assert len(input_tensors["questions_ids"]) == 1, "Finch press cannot be done with multiple questions"
             question_ids = input_tensors["questions_ids"][0].to(self.model.device)
-            context_ids = torch.cat((context_ids, question_ids[:, :-1]), dim=1)
-            question_len = len(question_ids[:, :-1][0])
-            if isinstance(press, FinchPress):
-                press.condition_len = question_len
-            else:
-                press.press.condition_len = question_len
-
+            context_ids = torch.cat((context_ids, question_ids), dim=1)
+            question_len = len(question_ids[0])
+            press.condition_len = question_len
             input_tensors["questions_ids"][0] = question_ids[:, -1:]
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> e68f742 (fix question len, adjusted the question ids for generation.)
-=======
-            #input_tensors["questions_ids"][0] = question_ids[:, :-1] #proposed fix 
-            
-            #print("print input tensor after giulio: ", input_tensors["questions_ids"])
->>>>>>> f0197c0 (clean FinchPress)
-=======
->>>>>>> f5c5f69 (normalization)
 
         # Prefilling using the press on the context
         if cache is None:
@@ -261,6 +235,7 @@ class KVPressTextGenerationPipeline(Pipeline):
         str
             The generated answer.
         """
+
         cache_seq_lengths = [cache.get_seq_length(layer_idx) for layer_idx in range(len(cache))]
         position_ids = torch.arange(
             context_length, context_length + question_ids.shape[1], device=self.model.device

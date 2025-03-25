@@ -32,8 +32,10 @@ class FinchPress(ScorerPress):
     """
 
     compression_ratio: float = 0.0
-    condition_len: int = None
+    condition_len: int = None # default is calculated in pipeline
     split_size: int = 2
+    normalize_scores: bool = True
+    sink_tokens : int = None # default is calculated in pipeline
 
     @staticmethod
     def compute_normalization_factors(attention_mask, attn_weights, tol=1e-8):
@@ -75,8 +77,10 @@ class FinchPress(ScorerPress):
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
 
         # Finch incorporates a normalization step, ensuring that each token’s relevance is equally evaluated.
-        non_zero_counts = self.compute_normalization_factors(attention_mask, attn_weights)
-        attn_weights = attn_weights * non_zero_counts
+        if self.normalize_scores:
+            non_zero_counts = self.compute_normalization_factors(attention_mask, attn_weights)
+
+            attn_weights = attn_weights * non_zero_counts
         attn_weights = attn_weights[..., :-condition_len]
         return attn_weights
 
@@ -95,10 +99,11 @@ class FinchPress(ScorerPress):
 
         if attentions is not None:
             attn_weights = attentions[..., -self.condition_len :, : -self.condition_len]
-            non_zero_counts = self.compute_normalization_factors(
-                kwargs["attention_mask"][..., -self.condition_len :, :q_len], attn_weights
-            )
-            attn_weights = attn_weights * non_zero_counts
+            if self.normalize_scores:
+                non_zero_counts = self.compute_normalization_factors(
+                    kwargs["attention_mask"][..., -self.condition_len :, :q_len], attn_weights
+                )
+                attn_weights = attn_weights * non_zero_counts
         else:
             attn_weights = self.compute_finch_attention(
                 module, hidden_states, keys, self.condition_len, kwargs["position_embeddings"]
@@ -108,6 +113,8 @@ class FinchPress(ScorerPress):
         scores = scores.sum(dim=2)
         # Add back the observation window. Use max score to make sure the window is not pruned.
         scores = F.pad(scores, (0, self.condition_len), value=scores.max().item())
+        # Keep always sink tokens
+        scores[:, :, :self.sink_tokens] = scores.max().item()
         return scores
 
     @staticmethod
@@ -150,13 +157,17 @@ class FinchPress(ScorerPress):
 
         context_length = kwargs["context_length"]
         last_iteration = kwargs["split_idx"] == self.split_size - 1
+        q_len = hidden_states.shape[1]
 
         if last_iteration:
             n_kept = int(context_length * (1 - self.compression_ratio)) + self.condition_len
         else:
-            n_kept = int((scores.shape[-1] - self.condition_len) * (1 - self.compression_ratio)) + self.condition_len
+            past_cache_len = scores.shape[-1] - q_len
+            n_kept = int((q_len - self.condition_len) * (1 - self.compression_ratio)) + self.condition_len + past_cache_len
 
         indices = scores.topk(n_kept, dim=-1).indices
+        # sort indices
+        indices, _ = torch.sort(indices, dim=-1)
         new_cos, new_sin = self._rerotate_cos_sin(keys, module.rotary_emb.inv_freq, indices)
         indices = indices.unsqueeze(-1).expand(-1, -1, -1, module.head_dim)
         keys = keys.gather(2, indices).contiguous()
@@ -279,6 +290,7 @@ class FinchPress(ScorerPress):
                                 .value_cache[layer_idx][:, :, : -self.condition_len, :]
                                 .contiguous()
                             )
+                    kwargs["past_key_values"]._seen_tokens = kwargs["past_key_values"].key_cache[0]
 
                 return last_output
 
