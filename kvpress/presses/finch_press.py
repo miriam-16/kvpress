@@ -45,7 +45,7 @@ class FinchPress(ScorerPress):
 
         return non_zero_counts
 
-    def compute_finch_attention(self, module, hidden_states, keys, condition_len, position_embeddings):
+    def compute_finch_attention(self, module, hidden_states, keys, condition_len, position_embeddings,kwargs):
         """Compute the last condition_len queries (question) and associated attention weights for the first q_len - condition_len keys (context)."""
         bsz, q_len, _ = hidden_states.shape
         num_heads = module.config.num_attention_heads
@@ -63,25 +63,39 @@ class FinchPress(ScorerPress):
 
         query_states = query_states.view(bsz, condition_len, num_heads, head_dim).transpose(1, 2)
 
+
         # Apply RoPE, considering queries only
         cos, sin = position_embeddings
         cos, sin = cos[:, -condition_len:], sin[:, -condition_len:]
         query_states = (query_states * cos.unsqueeze(1)) + (rotate_half(query_states) * sin.unsqueeze(1))
 
+        
         # Compute attention for context tokens
         key_states = repeat_kv(keys, num_key_value_groups)
+
+        if module.layer_idx == 0:
+              torch.save(query_states, f"query_matrix_{kwargs['split_idx']}_kvpress.pt")
+              torch.save(key_states, f"key_matrix_{kwargs['split_idx']}_kvpress.pt")
+
         attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(head_dim)
         attention_mask = torch.ones_like(attn_weights) * float("-inf")
         attention_mask = torch.triu(attention_mask, diagonal=key_states.shape[-2] - condition_len + 1)
         attn_weights += attention_mask
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
 
+
+
         # Finch incorporates a normalization step, ensuring that each token’s relevance is equally evaluated.
         if self.normalize_scores:
             non_zero_counts = self.compute_normalization_factors(attention_mask, attn_weights)
 
-            attn_weights = attn_weights * non_zero_counts
+            attn_weights = attn_weights / non_zero_counts
+        
         attn_weights = attn_weights[..., :-condition_len]
+
+        if module.layer_idx == 0:
+            torch.save(attn_weights, f"attention_matrix_after_normalization_{kwargs['split_idx']}_kvpress.pt")
+       
         return attn_weights
 
     def score(
@@ -106,15 +120,15 @@ class FinchPress(ScorerPress):
                 attn_weights = attn_weights * non_zero_counts
         else:
             attn_weights = self.compute_finch_attention(
-                module, hidden_states, keys, self.condition_len, kwargs["position_embeddings"]
+                module, hidden_states, keys, self.condition_len, kwargs["position_embeddings"],kwargs
             )
         scores = attn_weights.sum(dim=-2)
         scores = scores.view(bsz, num_key_value_heads, num_key_value_groups, q_len - self.condition_len)
         scores = scores.sum(dim=2)
         # Add back the observation window. Use max score to make sure the window is not pruned.
-        scores = F.pad(scores, (0, self.condition_len), value=scores.max().item())
+        scores = F.pad(scores, (0, self.condition_len), value=float("inf"))
         # Keep always sink tokens
-        scores[:, :, :self.sink_tokens] = scores.max().item()
+        scores[:, :, :self.sink_tokens] = float("inf")
         return scores
 
     @staticmethod
@@ -160,18 +174,39 @@ class FinchPress(ScorerPress):
         q_len = hidden_states.shape[1]
 
         if last_iteration:
+            if module.layer_idx==0:
+                print(context_length)
+                print(self.condition_len)
+
             n_kept = int(context_length * (1 - self.compression_ratio)) + self.condition_len
         else:
             past_cache_len = scores.shape[-1] - q_len
             n_kept = int((q_len - self.condition_len) * (1 - self.compression_ratio)) + self.condition_len + past_cache_len
 
+
+        if module.layer_idx==0:
+            print("n_kept: ",n_kept)
+
         indices = scores.topk(n_kept, dim=-1).indices
+
         # sort indices
         indices, _ = torch.sort(indices, dim=-1)
+
+        if module.layer_idx == 0:
+              torch.save(scores, f"scores_{kwargs['split_idx']}_kvpress.pt")
+              torch.save(indices, f"selected_indices_{kwargs['split_idx']}_kvpress.pt")
+
+
         new_cos, new_sin = self._rerotate_cos_sin(keys, module.rotary_emb.inv_freq, indices)
+
         indices = indices.unsqueeze(-1).expand(-1, -1, -1, module.head_dim)
         keys = keys.gather(2, indices).contiguous()
+
+
         keys = (keys * new_cos) + (rotate_half(keys) * new_sin)
+        if module.layer_idx == 0:
+                    torch.save(keys, f"torch_gather_result_{kwargs['split_idx']}_kvpress.pt")
+
         values = values.gather(2, indices).contiguous()
         return keys, values
 
@@ -199,8 +234,12 @@ class FinchPress(ScorerPress):
 
         """
 
+
+
+
         hidden_states = kwargs["hidden_states"]
         cache = kwargs["past_key_value"]
+
 
         if isinstance(cache, QuantizedCache):
             keys = cache._dequantize(cache._quantized_key_cache[module.layer_idx])
@@ -209,7 +248,9 @@ class FinchPress(ScorerPress):
             keys = cache.key_cache[module.layer_idx]
             values = cache.value_cache[module.layer_idx]
 
+        
         keys, values = self.compress(module, hidden_states, keys, values, output[1], kwargs)
+        
 
         if isinstance(cache, QuantizedCache):
             cache._quantized_key_cache[module.layer_idx] = cache._quantize(keys, axis=cache.axis_key)
@@ -220,6 +261,10 @@ class FinchPress(ScorerPress):
         else:
             cache.key_cache[module.layer_idx] = keys
             cache.value_cache[module.layer_idx] = values
+
+        if module.layer_idx == 0:
+              torch.save(cache.key_cache[module.layer_idx], f"cache_keys_end_{kwargs['split_idx']}_kvpress.pt")
+
 
         return output
 
@@ -232,8 +277,11 @@ class FinchPress(ScorerPress):
                 hooks.append(layer.self_attn.register_forward_hook(self.forward_hook, with_kwargs=True))
             # Save the original forward method
             original_forward = model.forward
+            print(model.__class__)
+            
 
             def chunked_forward(*args, **kwargs):
+
                 input_ids = kwargs.get("input_ids", None)
                 attention_mask = kwargs.get("attention_mask", None)
 
@@ -259,6 +307,8 @@ class FinchPress(ScorerPress):
                 print("Number of chunks:", self.split_size)
 
                 for i in range(self.split_size):
+                    print("kwargs: ", kwargs)
+                    print("args", args)
                     kwargs["split_idx"] = i
                     start = i * chunk_size
                     # For the last chunk, include any remaining tokens.
@@ -267,17 +317,19 @@ class FinchPress(ScorerPress):
                     # Get the current chunk from context_ids and combine with the question tokens.
                     context_chunk = context_ids[:, start:end]
 
-                    kwargs["input_ids"] = torch.cat((context_chunk, question_ids), dim=1)
+                    kwargs["input_ids"] = torch.cat([context_chunk, question_ids], dim=1)
 
                     if attention_mask is not None:
                         context_attention_mask_chunk = context_attention_mask[:, start:end]
                         kwargs["attention_mask"] = torch.cat(
-                            (context_attention_mask_chunk, question_attention_mask), dim=1
+                            [context_attention_mask_chunk, question_attention_mask], dim=1
                         )
-                    last_output = original_forward(*args, **kwargs)
+                    
+                    last_output = original_forward(use_cache=True, *args, **kwargs)
 
                     # Only adjust the past key/values caches if it's not the last iteration.
                     if i < self.split_size - 1:
+
                         for layer_idx, _ in enumerate(model.model.layers):
                             # Adjust the past key/values caches to remove the question tokens for the next iteration
                             kwargs["past_key_values"].key_cache[layer_idx] = (
@@ -290,7 +342,7 @@ class FinchPress(ScorerPress):
                                 .value_cache[layer_idx][:, :, : -self.condition_len, :]
                                 .contiguous()
                             )
-                    kwargs["past_key_values"]._seen_tokens = kwargs["past_key_values"].key_cache[0]
+                    kwargs["past_key_values"]._seen_tokens = kwargs["past_key_values"].key_cache[0].shape[2]
 
                 return last_output
 
