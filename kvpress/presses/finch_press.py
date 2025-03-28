@@ -178,19 +178,46 @@ class FinchPress(ScorerPress):
                 print(context_length)
                 print(self.condition_len)
 
-            n_kept = int(context_length * (1 - self.compression_ratio)) + self.condition_len
+            #n_kept_ = int(context_length * (1 - self.compression_ratio)) + self.condition_len
+            n_kept_context = int(context_length * (1 - self.compression_ratio))
         else:
             past_cache_len = scores.shape[-1] - q_len
-            n_kept = int((q_len - self.condition_len) * (1 - self.compression_ratio)) + self.condition_len + past_cache_len
+            #n_kept = int((q_len - self.condition_len) * (1 - self.compression_ratio)) + self.condition_len + past_cache_len
+            n_kept_context = int((q_len - self.condition_len) * (1 - self.compression_ratio))  + past_cache_len
+
+
 
 
         if module.layer_idx==0:
-            print("n_kept: ",n_kept)
+            print("n_kept: ",n_kept_context)
 
-        indices = scores.topk(n_kept, dim=-1).indices
+        indices_context= scores[:, :, :-self.condition_len].topk(n_kept_context, dim=-1).indices
+        indices_question = scores[:, :, self.sink_tokens:].topk(self.condition_len, dim=-1).indices + self.sink_tokens
+
+
+        
+
+        #sort indices
+        indices_context, _ = torch.sort(indices_context, dim=-1)
+        indices_question, _ = torch.sort(indices_question, dim=-1)
+        
+
+        if module.layer_idx == 0:
+              torch.save(indices_context, f"selected_indices_context_{kwargs['split_idx']}_kvpress.pt")
+              torch.save(indices_question, f"selected_indices_question_{kwargs['split_idx']}_kvpress.pt")
+
+        #concatenate the indices
+        indices = torch.cat([indices_context, indices_question], dim=-1)
 
         # sort indices
-        indices, _ = torch.sort(indices, dim=-1)
+        #indices, _ = torch.sort(indices, dim=-1)
+
+
+
+        #indices = scores.topk(n_kept, dim=-1).indices
+
+        # sort indices
+        #indices, _ = torch.sort(indices, dim=-1)
 
         if module.layer_idx == 0:
               torch.save(scores, f"scores_{kwargs['split_idx']}_kvpress.pt")
