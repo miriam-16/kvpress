@@ -14,6 +14,7 @@ from kvpress import (
     ThinKPress,
     TOVAPress,
     QFilterPress,
+    FinchPress,
 )
 
 
@@ -50,6 +51,13 @@ default_presses = [
         "kwargs": [
             {"lazy_threshold": 0.8, "n_initial": 1, "n_recent": 1, "n_last": 1},
             {"lazy_threshold": 0.2, "n_initial": 1, "n_recent": 1, "n_last": 1},
+        ],
+    },
+        {
+        "cls": FinchPress,
+        "kwargs": [
+            {"compression_ratio": 0.2, "condition_len": 2},
+            {"compression_ratio": 0.8, "condition_len": 2},
         ],
     },
 ]

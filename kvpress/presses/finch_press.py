@@ -34,7 +34,8 @@ class FinchPress(ScorerPress):
     compression_ratio: float = 0.0
     split_size: int = 1
     normalize_scores: bool = True
-    condition_len: int = None  # default is calculated in pipeline
+    # default is as SnapKV but can be changed depending on the length of question dynamically
+    condition_len: int = 64
 
     @staticmethod
     def compute_normalization_factors(attention_mask, attn_weights, tol=1e-8):
@@ -239,8 +240,13 @@ class FinchPress(ScorerPress):
             original_forward = model.forward
 
             def chunked_forward(*args, **kwargs):
-                input_ids = kwargs.get("input_ids", None)
-                attention_mask = kwargs.get("attention_mask", None)
+                args = list(args)
+                kwargs["input_ids"] = kwargs.get("input_ids", args.pop(0) if args else None)
+                kwargs["attention_mask"] = kwargs.get("attention_mask", args.pop(0) if args else None)
+                args = tuple(args)
+
+                input_ids = kwargs["input_ids"]
+                attention_mask = kwargs.get("attention_mask")
 
                 # Split input_ids into context and question tokens.
                 context_ids = input_ids[:, : -self.condition_len]
