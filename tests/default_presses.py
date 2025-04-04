@@ -6,6 +6,7 @@ import numpy as np
 from kvpress import (
     DuoAttentionPress,
     ExpectedAttentionPress,
+    FinchPress,
     KnormPress,
     RandomPress,
     SimLayerKVPress,
@@ -13,8 +14,11 @@ from kvpress import (
     StreamingLLMPress,
     ThinKPress,
     TOVAPress,
+<<<<<<< HEAD
     QFilterPress,
     FinchPress,
+=======
+>>>>>>> 8310877 (test passes)
 )
 
 

@@ -34,8 +34,7 @@ class FinchPress(ScorerPress):
     compression_ratio: float = 0.0
     split_size: int = 1
     normalize_scores: bool = True
-    # default is as SnapKV but can be changed depending on the length of question dynamically
-    condition_len: int = 64
+    condition_len: int = None  # calculate on length of question dynamically
 
     @staticmethod
     def compute_normalization_factors(attention_mask, attn_weights, tol=1e-8):
@@ -296,7 +295,7 @@ class FinchPress(ScorerPress):
                                 .value_cache[layer_idx][:, :, : -self.condition_len, :]
                                 .contiguous()
                             )
-                    kwargs["past_key_values"]._seen_tokens = kwargs["past_key_values"].key_cache[0].shape[2]
+                    kwargs["past_key_values"]._seen_tokens = kwargs["past_key_values"].get_seq_length()
 
                 return last_output
 
