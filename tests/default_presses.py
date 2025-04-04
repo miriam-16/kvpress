@@ -14,11 +14,8 @@ from kvpress import (
     StreamingLLMPress,
     ThinKPress,
     TOVAPress,
-<<<<<<< HEAD
     QFilterPress,
     FinchPress,
-=======
->>>>>>> 8310877 (test passes)
 )
 
 
