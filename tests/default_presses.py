@@ -8,14 +8,13 @@ from kvpress import (
     ExpectedAttentionPress,
     FinchPress,
     KnormPress,
+    QFilterPress,
     RandomPress,
     SimLayerKVPress,
     SnapKVPress,
     StreamingLLMPress,
     ThinKPress,
     TOVAPress,
-    QFilterPress,
-    FinchPress,
 )
 
 

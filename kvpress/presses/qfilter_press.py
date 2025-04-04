@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: Copyright (c) 1993-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from functools import cache
 from contextlib import contextmanager
 from dataclasses import dataclass
+from functools import cache
 
 import torch
 from huggingface_hub import PyTorchModelHubMixin, get_collection

@@ -36,7 +36,6 @@ from kvpress import (
     StreamingLLMPress,
     ThinKPress,
     TOVAPress,
-    QFilterPress,
 )
 
 logger = logging.getLogger(__name__)
