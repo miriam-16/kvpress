@@ -30,12 +30,12 @@ from kvpress import (
     FinchPress,
     KnormPress,
     ObservedAttentionPress,
+    QFilterPress,
     RandomPress,
     SnapKVPress,
     StreamingLLMPress,
     ThinKPress,
     TOVAPress,
-    QFilterPress,
 )
 
 logger = logging.getLogger(__name__)
