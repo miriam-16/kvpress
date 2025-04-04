@@ -22,6 +22,7 @@ from kvpress import (
     CriticalKVPress,
     DuoAttentionPress,
     ExpectedAttentionPress,
+    FinchPress,
     KnormPress,
     ObservedAttentionPress,
     RandomPress,
@@ -64,6 +65,7 @@ PRESS_DICT = {
     "think": ThinKPress(),
     "tova": TOVAPress(),
     "duo_attention": DuoAttentionPress(),
+    "finch": FinchPress(),
 }
 
 

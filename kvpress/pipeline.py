@@ -161,14 +161,12 @@ class KVPressTextGenerationPipeline(Pipeline):
         context_ids = input_tensors["context_ids"].to(self.model.device)
         context_length = context_ids.shape[1]
 
-        # customize based on finchPress
-        if isinstance(press, FinchPress):
+        if isinstance(press, FinchPress) or isinstance(getattr(press, "press", None), FinchPress):
             # finch press cannot be done with multiple questions
             assert len(input_tensors["questions_ids"]) == 1, "Finch press cannot be done with multiple questions"
             question_ids = input_tensors["questions_ids"][0].to(self.model.device)
-            context_ids = torch.cat((context_ids, question_ids), dim=1)
-            question_len = len(question_ids[0])
-            press.condition_len = question_len
+            context_ids = torch.cat((context_ids, question_ids[:, :-1]), dim=1)
+            press.condition_len = len(question_ids[:, :-1][0])
             input_tensors["questions_ids"][0] = question_ids[:, -1:]
 
         # Prefilling using the press on the context
@@ -192,7 +190,9 @@ class KVPressTextGenerationPipeline(Pipeline):
             answer = self.generate_answer(
                 question_ids=question_ids.to(self.model.device),
                 cache=cache,
-                context_length=(cache.get_seq_length() if isinstance(press, KeyRerotationPress) else context_length),
+                context_length=(
+                    cache.get_seq_length() if isinstance(press, (KeyRerotationPress, FinchPress)) else context_length
+                ),
                 max_new_tokens=max_new_tokens,
             )
             answers.append(answer)
