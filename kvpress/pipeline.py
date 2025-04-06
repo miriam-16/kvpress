@@ -158,7 +158,7 @@ class KVPressTextGenerationPipeline(Pipeline):
         list[str]
             A list of generated answers.
         """
-        
+
         context_ids = input_tensors["context_ids"].to(self.model.device)
         context_length = context_ids.shape[1]
 
