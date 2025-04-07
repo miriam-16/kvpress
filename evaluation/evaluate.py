@@ -18,6 +18,7 @@ from ruler.calculate_metrics import calculate_metrics as ruler_scorer
 from tqdm import tqdm
 from transformers import pipeline
 from zero_scrolls.calculate_metrics import calculate_metrics as zero_scrolls_scorer
+from spider_tableqa.calculate_metrics import calculate_metrics as spider_tableqa_scorer
 
 from kvpress import (
     AdaKVPress,
@@ -48,6 +49,7 @@ DATASET_DICT = {
     "longbench": "Xnhyacinth/LongBench",
     "longbench-e": "Xnhyacinth/LongBench",
     "longbench-v2": "Xnhyacinth/LongBench-v2",
+    "spider_tableqa": "EliaFaure/spider_tableQA_meg",
 }
 
 SCORER_DICT = {
@@ -58,6 +60,7 @@ SCORER_DICT = {
     "longbench": longbench_scorer,
     "longbench-e": longbench_scorer_e,
     "longbench-v2": longbenchv2_scorer,
+    "spider_tableqa": spider_tableqa_scorer,
 }
 
 PRESS_DICT = {
