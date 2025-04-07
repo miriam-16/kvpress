@@ -16,6 +16,7 @@ from kvpress.presses.finch_press import FinchPress
 from kvpress.presses.key_rerotation_press import KeyRerotationPress
 from kvpress.presses.observed_attention_press import ObservedAttentionPress
 from kvpress.presses.per_layer_compression_press import PerLayerCompressionPress
+from kvpress.presses.duo_attention_press import DuoAttentionPress
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ class KVPressTextGenerationPipeline(Pipeline):
         press: Optional[BasePress] = None,
         max_new_tokens: int = 50,
         max_context_length: Optional[int] = None,
+        max_capacity_context: Optional[int] = None,
         cache: Optional[Cache] = None,
         **kwargs,
     ):
@@ -81,7 +83,7 @@ class KVPressTextGenerationPipeline(Pipeline):
             "answer_prefix": answer_prefix,
             "max_context_length": max_context_length,
         }
-        forward_kwargs = {"press": press, "max_new_tokens": max_new_tokens, "cache": cache}
+        forward_kwargs = {"press": press, "max_new_tokens": max_new_tokens, "max_capacity_context": max_capacity_context, "cache": cache}
         return preprocess_kwargs, forward_kwargs, postprocess_kwargs
 
     def preprocess(
@@ -136,6 +138,7 @@ class KVPressTextGenerationPipeline(Pipeline):
         self,
         input_tensors: dict[str, GenericTensor],
         max_new_tokens: int = 50,
+        max_capacity_context: Optional[int] = None,
         press: Optional[BasePress] = None,
         cache: Optional[Cache] = None,
     ):
@@ -161,6 +164,21 @@ class KVPressTextGenerationPipeline(Pipeline):
 
         context_ids = input_tensors["context_ids"].to(self.model.device)
         context_length = context_ids.shape[1]
+        
+        if max_capacity_context is not None:
+            if context_length <= max_capacity_context:
+                compression_ratio = 0.0
+            else:
+                divisor = context_length // max_capacity_context
+                if divisor == 0:
+                    compression_ratio = 0.0
+                else:
+                    compression_ratio = 1.0 - (1.0 / divisor)
+            compression_ratio = max(0.0, min(compression_ratio, 1.0))
+            if isinstance(press, (DuoAttentionPress)):
+                press.head_compression_ratio = compression_ratio
+            else:
+                press.compression_ratio = compression_ratio
 
         if isinstance(press, FinchPress) or isinstance(getattr(press, "press", None), FinchPress):
             # finch press cannot be done with multiple questions

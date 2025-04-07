@@ -94,10 +94,11 @@ def evaluate(
     model: str = "meta-llama/Meta-Llama-3.1-8B-Instruct",
     device: Optional[str] = None,
     press_name: str = "expected_attention",
-    compression_ratio: float = 0.1,
+    compression_ratio: Optional[float] = None,
     fraction: float = 1.0,
     max_new_tokens: Optional[int] = None,
     max_context_length: Optional[int] = None,
+    max_capacity_context: Optional[int] = None,
     compress_questions: bool = False,
     key_channel_compression_ratio: float = 0.5,
 ):
@@ -132,6 +133,15 @@ def evaluate(
 
     assert dataset in DATASET_DICT, f"No dataset found for {dataset}"
     assert dataset in SCORER_DICT, f"No scorer found for {dataset}"
+    # assert only one of the following is set compression rate or max capacity
+    assert (
+        (compression_ratio is not None and max_capacity_context is None)
+        or (compression_ratio is None and max_capacity_context is not None)
+    ), "Either compression ratio or max capacity context should be set, not both"
+    # assert one of the two is set
+    assert (
+        compression_ratio is not None or max_capacity_context is not None
+    ), "Either compression ratio or max capacity context should be set"
     data_dir = str(data_dir) if data_dir else None
 
     if device is None:
@@ -139,10 +149,16 @@ def evaluate(
 
     save_dir = Path(__file__).parent / "results"
     save_dir.mkdir(exist_ok=True)
-    save_filename = save_dir / (
-        "__".join([dataset, data_dir if data_dir else "", model.replace("/", "--"), press_name, str(compression_ratio)])
+    if max_capacity_context is not None:
+        save_filename = save_dir / (
+        "__".join([dataset, data_dir if data_dir else "", model.replace("/", "--"), press_name, str(max_capacity_context)])
         + ".csv"
     )
+    else:  
+        save_filename = save_dir / (
+            "__".join([dataset, data_dir if data_dir else "", model.replace("/", "--"), press_name, str(compression_ratio)])
+            + ".csv"
+        )
     if save_filename.exists():
         logger.warning(f"Results already exist at {save_filename}")
 
@@ -165,25 +181,26 @@ def evaluate(
     # Load press
     assert press_name in PRESS_DICT
     press = PRESS_DICT[press_name]
-
-    if isinstance(press, (DuoAttentionPress)):
-        press.head_compression_ratio = compression_ratio
-    elif isinstance(press, (ComposedPress)):
-        for ps in press.presses:
-            if isinstance(ps, (ThinKPress)):
-                ps.key_channel_compression_ratio = key_channel_compression_ratio
-                save_filename = save_filename.with_name(
-                    save_filename.stem + f"__channel{key_channel_compression_ratio}" + save_filename.suffix
-                )
-            else:
-                ps.compression_ratio = compression_ratio  # type:ignore[attr-defined]
-    elif isinstance(press, (ThinKPress)):
-        press.key_channel_compression_ratio = key_channel_compression_ratio
-        save_filename = save_filename.with_name(
-            save_filename.stem + f"__channel{key_channel_compression_ratio}" + save_filename.suffix
-        )
-    else:
-        press.compression_ratio = compression_ratio  # type:ignore[attr-defined]
+    
+    if compression_ratio is not None:
+        if isinstance(press, (DuoAttentionPress)):
+            press.head_compression_ratio = compression_ratio
+        elif isinstance(press, (ComposedPress)):
+            for ps in press.presses:
+                if isinstance(ps, (ThinKPress)):
+                    ps.key_channel_compression_ratio = key_channel_compression_ratio
+                    save_filename = save_filename.with_name(
+                        save_filename.stem + f"__channel{key_channel_compression_ratio}" + save_filename.suffix
+                    )
+                else:
+                    ps.compression_ratio = compression_ratio  # type:ignore[attr-defined]
+        elif isinstance(press, (ThinKPress)):
+            press.key_channel_compression_ratio = key_channel_compression_ratio
+            save_filename = save_filename.with_name(
+                save_filename.stem + f"__channel{key_channel_compression_ratio}" + save_filename.suffix
+            )
+        else:
+            press.compression_ratio = compression_ratio  # type:ignore[attr-defined]
 
     # Initialize pipeline with the correct attention implementation
     model_kwargs = {"torch_dtype": "auto"}
@@ -203,24 +220,44 @@ def evaluate(
         pipe = pipeline("kv-press-text-generation", model=model, device=device, model_kwargs=model_kwargs)
     # Run pipeline on each context
     df["predicted_answer"] = None
-    df_context = df.groupby("context")
-    assert all(df_context["answer_prefix"].nunique() == 1)
-
-    for context, df_ in tqdm(df_context, total=df["context"].nunique()):
-        questions = df_["question"].to_list()
-        max_new_tokens_ = max_new_tokens if max_new_tokens is not None else df_["max_new_tokens"].iloc[0]
-        answer_prefix = df_["answer_prefix"].iloc[0]
-        output = pipe(
-            context,
-            questions=questions,
-            answer_prefix=answer_prefix,
-            press=press,
-            max_new_tokens=max_new_tokens_,
-            max_context_length=max_context_length,
-        )
-        df.loc[df_.index, "predicted_answer"] = output["answers"]
-        df.loc[df_.index, "compression_ratio"] = press.compression_ratio  # type:ignore[attr-defined]
-        torch.cuda.empty_cache()
+    if isinstance(press, FinchPress):
+        # Process each row individually
+        for idx, row in tqdm(df.iterrows(), total=len(df)):
+            question = row["question"]
+            max_new_tokens_ = max_new_tokens if max_new_tokens is not None else row["max_new_tokens"]
+            answer_prefix = row["answer_prefix"]
+            output = pipe(
+                row["context"],
+                questions=[question],
+                answer_prefix=answer_prefix,
+                press=press,
+                max_new_tokens=max_new_tokens_,
+                max_context_length=max_context_length,
+                max_capacity_context=max_capacity_context,
+            )
+            df.loc[idx, "predicted_answer"] = output["answers"][0]
+            df.loc[idx, "compression_ratio"] = press.compression_ratio  # type:ignore[attr-defined]
+            torch.cuda.empty_cache()
+    else:
+        # Group by context for other press types
+        df_context = df.groupby("context")
+        assert all(df_context["answer_prefix"].nunique() == 1)
+        for context, df_ in tqdm(df_context, total=df["context"].nunique()):
+            questions = df_["question"].to_list()
+            max_new_tokens_ = max_new_tokens if max_new_tokens is not None else df_["max_new_tokens"].iloc[0]
+            answer_prefix = df_["answer_prefix"].iloc[0]
+            output = pipe(
+                context,
+                questions=questions,
+                answer_prefix=answer_prefix,
+                press=press,
+                max_new_tokens=max_new_tokens_,
+                max_context_length=max_context_length,
+                max_capacity_context=max_capacity_context,
+            )
+            df.loc[df_.index, "predicted_answer"] = output["answers"]
+            df.loc[df_.index, "compression_ratio"] = press.compression_ratio  # type:ignore[attr-defined]
+            torch.cuda.empty_cache()
 
     # Save answers
     df[["predicted_answer", "compression_ratio"]].to_csv(str(save_filename), index=False)

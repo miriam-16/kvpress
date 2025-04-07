@@ -1,82 +1,74 @@
 import re
 import pandas as pd
-from qatch.connectors import SqliteConnector
-from qatch.evaluate_dataset.orchestrator_evaluator import OrchestratorEvaluator
-from qatch.evaluate_dataset.metrics_evaluators import cell_precision, cell_recall, tuple_cardinality, tuple_order, tuple_constraint, execution_accuracy
-
-def test_evaluate_orchestrator(preds,refs,db_names):
-
-    orchestrator = OrchestratorEvaluator(
-        evaluator_names=[
-            "cell_precision",
-            "cell_recall",
-            "tuple_cardinality",
-             #"tuple_order",
-            "tuple_constraint",
-            "execution_accuracy",
-        ]
+try:
+    from qatch.evaluate_dataset.metrics_evaluators import CellPrecision, CellRecall, ExecutionAccuracy, TupleCardinality, TupleConstraint, TupleOrder
+except ImportError as e:
+    print(
+        f"Module qatch not found. \
+          If test Spider, please install it using 'pip install qatch'"
     )
 
-    #create a dictionary which stores each metric defined in evaluator names
 
-    final_metrics={"cell_precision":[],
-            "cell_recall":[],
-            "tuple_cardinality":[],
-            #"tuple_order":[],
-            "tuple_constraint":[],
-            "execution_accuracy":[],}
+name2evaluator = {
+    "cell_precision": CellPrecision(),
+    "cell_recall": CellRecall(),
+    "tuple_cardinality": TupleCardinality(),
+    "tuple_order": TupleOrder(),
+    "tuple_constraint": TupleConstraint(),
+    "execution_accuracy": ExecutionAccuracy(),
+}
 
-    for pred, ref,db_name in zip(preds,refs,db_names): 
+def calculate_tableqa_metrics(preds, refs):
+    final_metrics = {
+        "cell_precision": [],
+        "cell_recall": [],
+        "tuple_cardinality": [],
+        "tuple_order": [],
+        "tuple_constraint": [],
+        "execution_accuracy": [],
+    }
+    
+    for pred, ref in zip(preds, refs):
         try:
             pred = eval(pred)
         except Exception as e:
-            print(f"prediction must be a List of lists: {pred}. Error: {e}")
-            result = {name: 0.0 for name in orchestrator.evaluator_names}
-        else:
-            ref= eval(ref)
-
-            result = orchestrator.evaluate_single_test(
-            target_query=ref,
-            predicted_query=pred,
-            connector=SqliteConnector(relative_db_path=rf"C:\Users\elyfa\OneDrive - eurecom.fr\SEMESTER_PROJECT\spider_data\spider_data\test_database\{db_name}\{db_name}.sqlite", db_name=db_name),
-        )
+            print(f"Prediction must be a list of lists: {pred}. Error: {e}")
+            for metric in final_metrics:
+                final_metrics[metric].append(0.0)
+            continue
         
-        #result is a dictionary, store each value in the list defined in final_etrix 
-        final_metrics["cell_precision"].append(result["cell_precision"])
-        final_metrics["cell_recall"].append(result["cell_recall"])
-        final_metrics["tuple_cardinality"].append(result["tuple_cardinality"])
-        final_metrics["tuple_constraint"].append(result["tuple_constraint"])
-        final_metrics["execution_accuracy"].append(result["execution_accuracy"])
-    #calculate the average of each metric
-    result = {}
-    for key in final_metrics.keys():
-        print(key)
-        print(final_metrics[key])
-        result[key] = sum(final_metrics[key])/len(final_metrics[key])
+        try:
+            ref = eval(ref)
+        except Exception as e:
+            print(f"Reference must be a list of lists: {ref}. Error: {e}")
+            for metric in final_metrics:
+                final_metrics[metric].append(0.0)
+            continue
+        
+        for metric in name2evaluator:
+            result = name2evaluator[metric].run_metric(prediction=pred, target=ref)
+            final_metrics[metric].append(result)
+    avg_metrics = {}
+    for metric, scores in final_metrics.items():
+        if scores:
+            avg = sum(scores) / len(scores)
+            avg_metrics[metric] = float(avg)
+        else:
+            avg_metrics[metric] = 0.0
+    global_average = float(sum(avg_metrics.values()) / len(avg_metrics)) if avg_metrics else 0.0
+    avg_metrics["average_score"] = global_average
     
-    #compute mean among different metrics
-    final_score = sum(result.values())/len(result)
-    print("final_score: ",final_score)
-    return final_score
-
-
-
+    return avg_metrics
 
 def calculate_metrics(df: pd.DataFrame) -> dict:
-    print("iniside calculate_metrics")
-    np_pattern = re.compile(r"[\x00-\x1f]")
-    df["predicted_answer"] = df["predicted_answer"].apply(lambda x: np_pattern.sub("", x.strip()).strip())
-
+    # This pattern captures text that starts with '[[' and ends with ']]'
+    pattern = re.compile(r"(\[\[.*\]\])")
+    df["predicted_answer"] = df["predicted_answer"].apply(
+        lambda x: pattern.search(x).group(1) if pattern.search(x) else x.strip()
+    )
     preds = df["predicted_answer"].tolist()
     refs = df["answer"].tolist()
-    db_names = df["db_id"].tolist()
-
-    preds=["[['a', 'b'], ['c', '']]","[['a', 'b'], ['c', 'd']]"]
-    refs=["[['a', 'b'], ['c', 'd']]","[['a', 'b'], ['c', 'd']]"]
-    
-    score = test_evaluate_orchestrator(preds, refs, db_names)
-    
-
+    score = calculate_tableqa_metrics(preds, refs)
     return score
 
 
