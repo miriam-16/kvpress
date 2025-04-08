@@ -1,7 +1,7 @@
 dataset="spider_tableqa"
 model="meta-llama/Meta-Llama-3.1-8B-Instruct"
 max_capacity_contexts=(131072 2048 1024 512 256)
-press_names=("finch")
+press_names=("finch" "ada_expected_attention_e2")
 
 # Check if the number of press names is less than or equal to the number of available GPUs
 num_gpus=$(nvidia-smi --list-gpus | wc -l)

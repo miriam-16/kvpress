@@ -220,6 +220,8 @@ def evaluate(
         pipe = pipeline("kv-press-text-generation", model=model, device=device, model_kwargs=model_kwargs)
     # Run pipeline on each context
     df["predicted_answer"] = None
+    # select just 100 examples for debugging
+    df = df.head(100)
     if isinstance(press, FinchPress):
         # Process each row individually
         for idx, row in tqdm(df.iterrows(), total=len(df)):

@@ -31,6 +31,14 @@ def calculate_tableqa_metrics(preds, refs):
     for pred, ref in zip(preds, refs):
         try:
             pred = eval(pred)
+            if not isinstance(pred, list):
+                print(f"Prediction must be a list of lists: {pred}. Error: {e}")
+                for metric in final_metrics:
+                    final_metrics[metric].append(0.0)
+            if len(pred) == 0:
+                pred = [[]]
+            elif len(pred) == 1 and not isinstance(pred[0], list):
+                pred = [pred]
         except Exception as e:
             print(f"Prediction must be a list of lists: {pred}. Error: {e}")
             for metric in final_metrics:
