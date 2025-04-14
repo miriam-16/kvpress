@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 1993-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from cachetools import LRUCache, cached  # type: ignore[import-untyped]
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from io import StringIO
@@ -8,7 +9,6 @@ from io import StringIO
 import numpy as np
 import requests  # type: ignore[import-untyped]
 import torch
-from cachetools import LRUCache, cached  # type: ignore[import-untyped]
 from datasets import load_dataset
 from transformers import AutoTokenizer
 from transformers.models.llama.modeling_llama import apply_rotary_pos_emb

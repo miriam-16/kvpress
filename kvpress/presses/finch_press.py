@@ -12,11 +12,11 @@ from torch.nn import functional as F
 from transformers import PreTrainedModel, QuantizedCache
 from transformers.models.llama.modeling_llama import repeat_kv, rotate_half
 
-from kvpress.presses.scorer_press import ScorerPress
+from kvpress.presses.base_press import BasePress
 
 
 @dataclass
-class FinchPress(ScorerPress):
+class FinchPress(BasePress):
     """
     Finch uses the attention information between the prompt and the document chunk to dynamically
     identify the most relevant KV pairs across different layers.
@@ -35,14 +35,6 @@ class FinchPress(ScorerPress):
     split_size: int = 1
     normalize_scores: bool = True
     condition_len: int = None  # calculate on length of question dynamically
-
-    @staticmethod
-    def compute_normalization_factors(attention_mask, attn_weights, tol=1e-8):
-        binary_mask = (torch.abs(attention_mask.to(torch.float32)) < tol).to(torch.float32)
-        non_zero_counts = binary_mask.sum(dim=3, keepdim=True)
-        non_zero_counts = torch.clamp_min(non_zero_counts, 1.0).to(attn_weights.dtype)
-
-        return non_zero_counts
 
     def compute_finch_attention(self, module, hidden_states, keys, condition_len, position_embeddings, kwargs):
         """
@@ -78,43 +70,30 @@ class FinchPress(ScorerPress):
         attention_mask = torch.triu(attention_mask, diagonal=key_states.shape[-2] - condition_len + 1)
         attn_weights += attention_mask
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
-
-        # Finch incorporates a normalization step, ensuring that each token’s relevance is equally evaluated.
-        if self.normalize_scores:
-            non_zero_counts = self.compute_normalization_factors(attention_mask, attn_weights)
-
-            attn_weights = attn_weights * non_zero_counts
-
         attn_weights = attn_weights[..., :-condition_len]
         return attn_weights
 
-    def score(
-        self,
-        module: nn.Module,
-        hidden_states: torch.Tensor,
-        keys: torch.Tensor,
-        values: torch.Tensor,
-        attentions: torch.Tensor,
-        kwargs,
-    ) -> torch.Tensor:
+    def score(self, module, hidden_states, keys, values, attentions, kwargs):
 
         bsz, num_key_value_heads, q_len, _ = keys.shape
         num_key_value_groups = module.config.num_attention_heads // num_key_value_heads
 
         if attentions is not None:
-            attn_weights = attentions[..., -self.condition_len :, : -self.condition_len]
-            if self.normalize_scores:
-                non_zero_counts = self.compute_normalization_factors(
-                    kwargs["attention_mask"][..., -self.condition_len :, :q_len], attn_weights
-                )
-                attn_weights = attn_weights * non_zero_counts
+            attn_weights = attentions[..., -self.condition_len:, : -self.condition_len]
         else:
             attn_weights = self.compute_finch_attention(
                 module, hidden_states, keys, self.condition_len, kwargs["position_embeddings"], kwargs
             )
-        scores = attn_weights.sum(dim=-2)
+        if self.normalize_scores:
+            non_zero_counts = torch.arange(q_len - self.condition_len, q_len)[None, None, :, None]
+            non_zero_counts = non_zero_counts.to(attn_weights.device)
+            attn_weights = attn_weights * non_zero_counts
+
+        # Average per group
+        scores = attn_weights.mean(dim=-2)
         scores = scores.view(bsz, num_key_value_heads, num_key_value_groups, q_len - self.condition_len)
-        scores = scores.sum(dim=2)
+        scores = scores.mean(dim=2)
+
         # Add back the observation window. Use max score to make sure the window is not pruned.
         scores = F.pad(scores, (0, self.condition_len), value=scores.max().item())
         return scores
@@ -208,6 +187,11 @@ class FinchPress(ScorerPress):
         """
         hidden_states = kwargs["hidden_states"]
         cache = kwargs["past_key_value"]
+        q_len = hidden_states.shape[1]
+
+        # Don't compress after pre-filling
+        if kwargs["cache_position"][-1] > q_len + cache.get_seq_length():
+            return output
 
         if isinstance(cache, QuantizedCache):
             keys = cache._dequantize(cache._quantized_key_cache[module.layer_idx])
