@@ -230,17 +230,18 @@ class FinchPress(BasePress):
                     if i < self.split_size - 1:
                         for layer_idx, _ in enumerate(model.model.layers):
                             # Adjust the past key/values caches to remove the question tokens for the next iteration
-                            kwargs["past_key_values"].key_cache[layer_idx] = (
-                                kwargs["past_key_values"]
+                            last_output.past_key_values.key_cache[layer_idx] = (
+                                last_output.past_key_values
                                 .key_cache[layer_idx][:, :, : -self.condition_len, :]
                                 .contiguous()
                             )
-                            kwargs["past_key_values"].value_cache[layer_idx] = (
-                                kwargs["past_key_values"]
+                            last_output.past_key_values.value_cache[layer_idx] = (
+                                last_output.past_key_values
                                 .value_cache[layer_idx][:, :, : -self.condition_len, :]
                                 .contiguous()
                             )
-                    kwargs["past_key_values"]._seen_tokens = kwargs["past_key_values"].get_seq_length()
+                    last_output.past_key_values._seen_tokens = last_output.past_key_values.get_seq_length()
+                    kwargs["past_key_values"] = last_output.past_key_values
 
                 return last_output
 
