@@ -13,6 +13,7 @@ from transformers import PreTrainedModel, QuantizedCache
 from transformers.models.llama.modeling_llama import repeat_kv, rotate_half
 
 from kvpress.presses.base_press import BasePress
+from kvpress.presses.snapkv_press import SnapKVPress
 
 
 @dataclass
