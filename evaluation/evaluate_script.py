@@ -19,6 +19,8 @@ from tqdm import tqdm
 from transformers import pipeline
 from zero_scrolls.calculate_metrics import calculate_metrics as zero_scrolls_scorer
 from spider_tableqa.calculate_metrics import calculate_metrics as spider_tableqa_scorer
+from wtq_tableqa.calculate_metrics import calculate_metrics as wtq_tableqa_scorer
+from qtsumm.calculate_metrics import calculate_metrics as qtsumm_scorer
 
 from kvpress import (
     AdaKVPress,
@@ -50,6 +52,13 @@ DATASET_DICT = {
     "longbench-e": "Xnhyacinth/LongBench",
     "longbench-v2": "Xnhyacinth/LongBench-v2",
     "spider_tableqa": "EliaFaure/spider_tableQA_meg",
+    "spider_tableqa_rag": "EliaFaure/RAG_spider_tableQA_meg",
+    "wtq_tableqa": "miriam-16/WikitableQA_meg",
+    "wtq_tableqa_rag": "miriam-16/RAG_wikitableQA_meg",
+    "qtsumm": "miriam-16/QTSumm_tableQA_meg",
+    "qtsumm_rag": "miriam-16/RAG_QTSumm_tableQA_meg",
+    "wtq_tableqa_serialized": "miriam-16/Serialized_wikitable_meg",
+    "wtq_tableqa_ablation": "EliaFaure/ablation_WikiTableQA_meg",
 }
 
 SCORER_DICT = {
@@ -61,6 +70,13 @@ SCORER_DICT = {
     "longbench-e": longbench_scorer_e,
     "longbench-v2": longbenchv2_scorer,
     "spider_tableqa": spider_tableqa_scorer,
+    "spider_tableqa_rag": spider_tableqa_scorer,
+    "wtq_tableqa": wtq_tableqa_scorer,
+    "wtq_tableqa_rag": wtq_tableqa_scorer,
+    "qtsumm": qtsumm_scorer,
+    "qtsumm_rag": qtsumm_scorer,
+    "wtq_tableqa_serialized": wtq_tableqa_scorer,
+    "wtq_tableqa_ablation": wtq_tableqa_scorer,
 }
 
 PRESS_DICT = {
@@ -134,9 +150,8 @@ def evaluate(
     assert dataset in DATASET_DICT, f"No dataset found for {dataset}"
     assert dataset in SCORER_DICT, f"No scorer found for {dataset}"
     # assert only one of the following is set compression rate or max capacity
-    assert (
-        (compression_ratio is not None and max_capacity_context is None)
-        or (compression_ratio is None and max_capacity_context is not None)
+    assert (compression_ratio is not None and max_capacity_context is None) or (
+        compression_ratio is None and max_capacity_context is not None
     ), "Either compression ratio or max capacity context should be set, not both"
     # assert one of the two is set
     assert (
@@ -151,12 +166,16 @@ def evaluate(
     save_dir.mkdir(exist_ok=True)
     if max_capacity_context is not None:
         save_filename = save_dir / (
-        "__".join([dataset, data_dir if data_dir else "", model.replace("/", "--"), press_name, str(max_capacity_context)])
-        + ".csv"
-    )
-    else:  
+            "__".join(
+                [dataset, data_dir if data_dir else "", model.replace("/", "--"), press_name, str(max_capacity_context)]
+            )
+            + ".csv"
+        )
+    else:
         save_filename = save_dir / (
-            "__".join([dataset, data_dir if data_dir else "", model.replace("/", "--"), press_name, str(compression_ratio)])
+            "__".join(
+                [dataset, data_dir if data_dir else "", model.replace("/", "--"), press_name, str(compression_ratio)]
+            )
             + ".csv"
         )
     if save_filename.exists():
@@ -181,7 +200,7 @@ def evaluate(
     # Load press
     assert press_name in PRESS_DICT
     press = PRESS_DICT[press_name]
-    
+
     if compression_ratio is not None:
         if isinstance(press, (DuoAttentionPress)):
             press.head_compression_ratio = compression_ratio
@@ -213,6 +232,18 @@ def evaluate(
             model_kwargs["attn_implementation"] = "flash_attention_2"
         except ImportError:
             pass
+    
+    if "qwen" in model.lower():
+        # Append additional keyword arguments for Qwen
+        print("Applying yarn technique for Qwen model")
+        model_kwargs.update({
+            "max_position_embeddings": 131072,
+            "rope_scaling": {
+                "factor": 4.0,
+                "original_max_position_embeddings": 32768,
+                "type": "yarn"
+            }
+        })
 
     if device == "auto":
         pipe = pipeline("kv-press-text-generation", model=model, device_map="auto", model_kwargs=model_kwargs)
@@ -221,7 +252,7 @@ def evaluate(
     # Run pipeline on each context
     df["predicted_answer"] = None
     # select just 100 examples for debugging
-    df = df.head(100)
+    # df = df.head(100)
     if isinstance(press, FinchPress):
         # Process each row individually
         for idx, row in tqdm(df.iterrows(), total=len(df)):

@@ -81,8 +81,8 @@ class FinchPress(ScorerPress):
 
         # Finch incorporates a normalization step, ensuring that each token’s relevance is equally evaluated.
         if self.normalize_scores:
-            non_zero_counts = self.compute_normalization_factors(attention_mask, attn_weights)
-
+            non_zero_counts = torch.arange(q_len - self.condition_len, q_len)[None, None, :, None]
+            non_zero_counts = non_zero_counts.to(attn_weights.device)
             attn_weights = attn_weights * non_zero_counts
 
         attn_weights = attn_weights[..., :-condition_len]
@@ -104,17 +104,16 @@ class FinchPress(ScorerPress):
         if attentions is not None:
             attn_weights = attentions[..., -self.condition_len :, : -self.condition_len]
             if self.normalize_scores:
-                non_zero_counts = self.compute_normalization_factors(
-                    kwargs["attention_mask"][..., -self.condition_len :, :q_len], attn_weights
-                )
+                non_zero_counts = torch.arange(q_len - self.condition_len, q_len)[None, None, :, None]
+                non_zero_counts = non_zero_counts.to(attn_weights.device)
                 attn_weights = attn_weights * non_zero_counts
         else:
             attn_weights = self.compute_finch_attention(
                 module, hidden_states, keys, self.condition_len, kwargs["position_embeddings"], kwargs
             )
-        scores = attn_weights.sum(dim=-2)
+        scores = attn_weights.mean(dim=-2)
         scores = scores.view(bsz, num_key_value_heads, num_key_value_groups, q_len - self.condition_len)
-        scores = scores.sum(dim=2)
+        scores = scores.mean(dim=2)
         # Add back the observation window. Use max score to make sure the window is not pruned.
         scores = F.pad(scores, (0, self.condition_len), value=scores.max().item())
         return scores
@@ -208,6 +207,11 @@ class FinchPress(ScorerPress):
         """
         hidden_states = kwargs["hidden_states"]
         cache = kwargs["past_key_value"]
+        q_len = hidden_states.shape[1]
+
+        # Don't compress after pre-filling
+        if kwargs["cache_position"][-1] > q_len + cache.get_seq_length():
+            return output
 
         if isinstance(cache, QuantizedCache):
             keys = cache._dequantize(cache._quantized_key_cache[module.layer_idx])

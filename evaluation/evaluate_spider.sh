@@ -1,7 +1,7 @@
 dataset="spider_tableqa"
-model="meta-llama/Meta-Llama-3.1-8B-Instruct"
-max_capacity_contexts=(131072 2048 1024 512 256)
-press_names=("finch" "ada_expected_attention_e2")
+model="Qwen/Qwen2.5-7B-Instruct"
+max_capacity_contexts=(2048)
+press_names=("finch")
 
 # Check if the number of press names is less than or equal to the number of available GPUs
 num_gpus=$(nvidia-smi --list-gpus | wc -l)
@@ -18,7 +18,7 @@ for i in "${!press_names[@]}"; do
   (
     for max_capacity_context in "${max_capacity_contexts[@]}"; do
       echo "Running press_name: $press with max_capacity_context: $max_capacity_context on GPU cuda:$i"
-      python evaluate.py --dataset $dataset --model $model --press_name $press --max_capacity_context $max_capacity_context --device "cuda:$i"
+      python evaluate_script.py --dataset $dataset --model $model --press_name $press --max_capacity_context $max_capacity_context --device "cuda:$i"
     done
   ) &
 done

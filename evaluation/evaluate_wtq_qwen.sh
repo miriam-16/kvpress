@@ -1,8 +1,7 @@
-dataset="ruler"
-data_dir="4096"
-model="meta-llama/Meta-Llama-3.1-8B-Instruct"
-compression_ratios=(0.1 0.5)
-press_names=("finch")
+dataset="wtq_tableqa"
+model="Qwen/Qwen2.5-7B-Instruct"
+max_capacity_contexts=(131072 2048 1024 512 256 128)
+press_names=("finch" "ada_expected_attention_e2")
 
 # Check if the number of press names is less than or equal to the number of available GPUs
 num_gpus=$(nvidia-smi --list-gpus | wc -l)
@@ -17,9 +16,9 @@ for i in "${!press_names[@]}"; do
   
   # Run each press_name on a different GPU in the background
   (
-    for compression_ratio in "${compression_ratios[@]}"; do
-      echo "Running press_name: $press with compression_ratio: $compression_ratio on GPU cuda:$i"
-      python evaluate_script.py --dataset $dataset --data_dir $data_dir --model $model --press_name $press --compression_ratio $compression_ratio --device "cuda:1"
+    for max_capacity_context in "${max_capacity_contexts[@]}"; do
+      echo "Running press_name: $press with max_capacity_context: $max_capacity_context on GPU cuda:$i"
+      python evaluate_script.py --dataset $dataset --model $model --press_name $press --max_capacity_context $max_capacity_context --device "cuda:$i"
     done
   ) &
 done

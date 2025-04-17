@@ -83,7 +83,12 @@ class KVPressTextGenerationPipeline(Pipeline):
             "answer_prefix": answer_prefix,
             "max_context_length": max_context_length,
         }
-        forward_kwargs = {"press": press, "max_new_tokens": max_new_tokens, "max_capacity_context": max_capacity_context, "cache": cache}
+        forward_kwargs = {
+            "press": press,
+            "max_new_tokens": max_new_tokens,
+            "max_capacity_context": max_capacity_context,
+            "cache": cache,
+        }
         return preprocess_kwargs, forward_kwargs, postprocess_kwargs
 
     def preprocess(
@@ -164,7 +169,7 @@ class KVPressTextGenerationPipeline(Pipeline):
 
         context_ids = input_tensors["context_ids"].to(self.model.device)
         context_length = context_ids.shape[1]
-        
+
         if max_capacity_context is not None:
             if context_length <= max_capacity_context:
                 compression_ratio = 0.0

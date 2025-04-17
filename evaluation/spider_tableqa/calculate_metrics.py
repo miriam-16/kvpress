@@ -1,10 +1,18 @@
 import re
 import pandas as pd
+
 try:
-    from qatch.evaluate_dataset.metrics_evaluators import CellPrecision, CellRecall, ExecutionAccuracy, TupleCardinality, TupleConstraint, TupleOrder
+    from qatch.evaluate_dataset.metrics_evaluators import (
+        CellPrecision,
+        CellRecall,
+        ExecutionAccuracy,
+        TupleCardinality,
+        TupleConstraint,
+        TupleOrder,
+    )
 except ImportError as e:
     print(
-        f"Module qatch not found. \
+        f"{e}: Module qatch not found. \
           If test Spider, please install it using 'pip install qatch'"
     )
 
@@ -18,6 +26,7 @@ name2evaluator = {
     "execution_accuracy": ExecutionAccuracy(),
 }
 
+
 def calculate_tableqa_metrics(preds, refs):
     final_metrics = {
         "cell_precision": [],
@@ -27,12 +36,10 @@ def calculate_tableqa_metrics(preds, refs):
         "tuple_constraint": [],
         "execution_accuracy": [],
     }
-    
     for pred, ref in zip(preds, refs):
         try:
             pred = eval(pred)
             if not isinstance(pred, list):
-                print(f"Prediction must be a list of lists: {pred}. Error: {e}")
                 for metric in final_metrics:
                     final_metrics[metric].append(0.0)
             if len(pred) == 0:
@@ -44,7 +51,7 @@ def calculate_tableqa_metrics(preds, refs):
             for metric in final_metrics:
                 final_metrics[metric].append(0.0)
             continue
-        
+
         try:
             ref = eval(ref)
         except Exception as e:
@@ -52,10 +59,14 @@ def calculate_tableqa_metrics(preds, refs):
             for metric in final_metrics:
                 final_metrics[metric].append(0.0)
             continue
-        
+
         for metric in name2evaluator:
-            result = name2evaluator[metric].run_metric(prediction=pred, target=ref)
-            final_metrics[metric].append(result)
+            try:
+                result = name2evaluator[metric].run_metric(prediction=pred, target=ref)
+                final_metrics[metric].append(result)
+            except Exception:
+                final_metrics[metric].append(0.0)
+                continue
     avg_metrics = {}
     for metric, scores in final_metrics.items():
         if scores:
@@ -65,8 +76,9 @@ def calculate_tableqa_metrics(preds, refs):
             avg_metrics[metric] = 0.0
     global_average = float(sum(avg_metrics.values()) / len(avg_metrics)) if avg_metrics else 0.0
     avg_metrics["average_score"] = global_average
-    
+
     return avg_metrics
+
 
 def calculate_metrics(df: pd.DataFrame) -> dict:
     # This pattern captures text that starts with '[[' and ends with ']]'
@@ -78,7 +90,3 @@ def calculate_metrics(df: pd.DataFrame) -> dict:
     refs = df["answer"].tolist()
     score = calculate_tableqa_metrics(preds, refs)
     return score
-
-
-
-
