@@ -101,6 +101,14 @@ class KVPressTextGenerationPipeline(Pipeline):
 
         """
 
+
+        tuple_end_token = "<tuple_end>"
+
+        if "<tuple_end>" not in self.tokenizer.special_tokens_map:
+            self.tokenizer.add_special_tokens({'additional_special_tokens': ['<tuple_end>']})
+            self.model.resize_token_embeddings(len(self.tokenizer))
+
+
         # Apply chat template if available
         if self.tokenizer.chat_template is None:
             bos_token = getattr(self.tokenizer, "bos_token", "")
@@ -113,6 +121,15 @@ class KVPressTextGenerationPipeline(Pipeline):
             )
             context, question_suffix = context.split(separator)
 
+        context = context.split(tuple_end_token)  #SPLIT BY TUPLE END TOKEN 
+        print("print context split by separator")
+        print(context)
+        context = " ".join([item.strip() + f" {tuple_end_token}" for item in context[:-1]]) + context[-1]  
+
+        print("print context REJOINED")
+        print(context)
+
+
         # Add question_suffix and answer prefix
         # e.g. for llama3.1, question_suffix="<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n")
         questions = [question + question_suffix + answer_prefix for question in questions]
@@ -122,6 +139,9 @@ class KVPressTextGenerationPipeline(Pipeline):
         question_ids = [
             self.tokenizer.encode(question, return_tensors="pt", add_special_tokens=False) for question in questions
         ]
+
+        print("PRINT TOKENIZED CONTEXT")
+        print(context_ids)
 
         # Truncate context
         if context_ids.shape[1] > max_context_length:
@@ -174,7 +194,7 @@ class KVPressTextGenerationPipeline(Pipeline):
         if cache is None:
             cache = DynamicCache()
 
-        with press(self.model) if press is not None else contextlib.nullcontext():
+        with press(self.model, self.tokenizer) if press is not None else contextlib.nullcontext():
             self.model(
                 input_ids=context_ids,
                 past_key_values=cache,

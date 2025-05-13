@@ -108,7 +108,95 @@ class FinchPress(BasePress):
             past_cache_len = scores.shape[-1] - q_len
             n_kept_context = int((q_len - self.condition_len) * (1 - self.compression_ratio)) + past_cache_len
 
-        indices_context = scores[:, :, : -self.condition_len].topk(n_kept_context, dim=-1).indices
+        #NEW PART 
+        #_______________________________________________________________#
+
+        input_ids = self.current_input_ids  # shape: (seq_len,)
+        tokenizer = self.tokenizer
+        tuple_end_token_id = tokenizer.convert_tokens_to_ids("<tuple_end>") #retrieve the token of the separator
+
+        #Identify token positions for each tuple
+        tuple_end_positions = (input_ids == tuple_end_token_id).nonzero(as_tuple=True)[1]
+
+        tuple_ranges = []
+        start = 0
+        for end in tuple_end_positions:
+            tuple_ranges.append((start, end.item() + 1))  # include <tuple_end>
+            start = end.item() + 1
+
+        top_indices = scores[:, :, :-self.condition_len].topk(n_kept_context, dim=-1).indices  #get the top indices
+        important_token_set = set(top_indices.flatten().tolist())  #save the most important tokens in a set
+        
+        batch_top_indices=top_indices[0]
+        num_heads=top_indices.shape[1]
+
+        head_kept_token_sets = [set(batch_top_indices[head].tolist()) for head in range(num_heads)]
+        head_kept_tuple_indices = [set() for _ in range(num_heads)]  # which token positions to keep per head
+
+        for head in range(num_heads):
+            important_tokens = head_kept_token_sets[head]
+            tuples_inserted=set()
+            current_num_tokens = 0
+
+            for token in important_tokens:
+                print("new important token: ",token)
+                i=0
+                for start, end in tuple_ranges: 
+                    if token in range(start, end):
+                        tuple_size = end - start
+                        if current_num_tokens + tuple_size <= n_kept_context and i not in tuples_inserted:
+                            head_kept_tuple_indices[head].update(range(start, end))
+                            current_num_tokens += tuple_size
+                            #print("added: ",tuple_size)
+                            tuples_inserted.add(i)
+                        elif i not in tuples_inserted:
+                            # If adding the whole tuple would exceed the max tokens, only add the necessary tokens
+                            tokens_needed = n_kept_context - current_num_tokens
+                            
+                            head_kept_tuple_indices[head].update(range(start, start + tokens_needed))
+                            
+                            current_num_tokens += tokens_needed
+                
+                            tuples_inserted.add(i)
+                            break  # Move to the next important token
+                    i+=1
+                if current_num_tokens >= n_kept_context:
+                    break
+            print("final number of tokens: ",current_num_tokens)
+            print("final_len: ",len(head_kept_tuple_indices[head]))
+
+
+            """current_num_tokens = len(head_kept_tuple_indices[head])
+
+            for start, end in tuple_ranges:
+                if any(pos in important_tokens for pos in range(start, end)):
+
+                    tuple_size = end - start
+                    if current_num_tokens + tuple_size <= n_kept_context:
+                        head_kept_tuple_indices[head].update(range(start, end))
+                        current_num_tokens += tuple_size
+                    else:
+                        # If adding the whole tuple would exceed the max tokens, only add the necessary tokens
+                        tokens_needed = n_kept_context - current_num_tokens
+                        head_kept_tuple_indices[head].update(range(start, start + tokens_needed))
+                        current_num_tokens += tuple_size"""
+            
+        print("FINISHED")
+
+        head_kept_tuple_indices = [sorted(list(kept_tokens)) for kept_tokens in head_kept_tuple_indices]
+
+        head_kept_tuple_indices = torch.tensor(head_kept_tuple_indices)
+        print(head_kept_tuple_indices.shape)
+        indices_context = head_kept_tuple_indices.unsqueeze(0).expand(self.split_size, -1, -1)
+
+        #_______________________________________________________________#
+        #END OF NEW PART
+
+
+        #OLD PART
+
+        #indices_context = scores[:, :, : -self.condition_len].topk(n_kept_context, dim=-1).indices
+
         indices_condition = torch.arange(scores.shape[-1] - self.condition_len, scores.shape[-1], device=scores.device)[
             None, None, :
         ].expand(scores.shape[0], scores.shape[1], -1)
@@ -147,6 +235,7 @@ class FinchPress(BasePress):
         -------
             Modified output of the forward pass of the layer.
         """
+
         hidden_states = kwargs["hidden_states"]
         cache = kwargs["past_key_value"]
         q_len = hidden_states.shape[1]
@@ -176,8 +265,10 @@ class FinchPress(BasePress):
         return output
 
     @contextmanager
-    def __call__(self, model: PreTrainedModel):
+    def __call__(self, model: PreTrainedModel, tokenizer):
         hooks = []
+        self.tokenizer=tokenizer #save it globally
+
         try:
             for layer in model.model.layers:
                 layer.self_attn.rotary_emb = model.model.rotary_emb
@@ -218,6 +309,8 @@ class FinchPress(BasePress):
                     # Get the current chunk from context_ids and combine with the question tokens.
                     context_chunk = context_ids[:, start:end]
                     kwargs["input_ids"] = torch.cat([context_chunk, question_ids], dim=1)
+
+                    self.current_input_ids = kwargs["input_ids"] #save them in a global variable 
 
                     if attention_mask is not None:
                         context_attention_mask_chunk = context_attention_mask[:, start:end]
