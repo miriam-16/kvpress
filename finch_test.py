@@ -3,11 +3,11 @@ from bs4 import BeautifulSoup
 
 import torch
 from transformers import pipeline
-from kvpress import FinchPress, KeyRerotationPress, SnapKVPress, FinchPressTSNaive,FinchPressWTS
+from kvpress import FinchPress, KeyRerotationPress, SnapKVPress, FinchPressTSNaive,FinchPressWTS, FinchPressWCS
 
 
 
-context = "[[1, 2, 3]<tuple_end>[4, 5, 6]<tuple_end>[7, 8, 9]<tuple_end>]"
+context = "[[1, 2, 3]<tuple_end>[4, 5, 6]<tuple_end>[7, 8, 9]<tuple_end>[10, 11, 12]<tuple_end>[13, 14, 15]<tuple_end>[16, 17, 18]<tuple_end>[19, 20, 21]<tuple_end>]"
 question= "come stai?"
 
 model_name= "HuggingFaceTB/SmolLM-135M-Instruct"
@@ -22,7 +22,7 @@ print("MODEL LOADED")
 
 
 
-press= FinchPressWTS(compression_ratio=0.6, split_size=1)
+press= FinchPressWCS(compression_ratio=0.8, split_size=1)
 
 #press=SnapKVPress(compression_ratio=0.1,window_size=3)
 answer = pipe(context, question=question, press=press)["answer"]

@@ -14,6 +14,7 @@ from transformers.pipelines.base import GenericTensor
 from kvpress.presses.base_press import BasePress
 from kvpress.presses.finch_press import FinchPress
 from kvpress.presses.finch_press_tuple_selection_naive import FinchPressTSNaive
+from kvpress.presses.finch_press_window_column_selection import FinchPressWCS
 from kvpress.presses.key_rerotation_press import KeyRerotationPress
 from kvpress.presses.observed_attention_press import ObservedAttentionPress
 from kvpress.presses.per_layer_compression_press import PerLayerCompressionPress
@@ -123,10 +124,10 @@ class KVPressTextGenerationPipeline(Pipeline):
             )
             context, question_suffix = context.split(separator)
 
-        context = context.split(tuple_end_token)  #SPLIT BY TUPLE END TOKEN 
+        context = context.split(tuple_end_token)  #SPLIT BY TUPLE END TOKEN
         print("print context split by separator")
         print(context)
-        context = " ".join([item.strip() + f" {tuple_end_token}" for item in context[:-1]]) + context[-1]  
+        context = " ".join([item.strip() + f" {tuple_end_token}" for item in context[:-1]]) + context[-1]
 
         print("FINAL print context REJOINED")
         print(context)
@@ -184,7 +185,7 @@ class KVPressTextGenerationPipeline(Pipeline):
         context_ids = input_tensors["context_ids"].to(self.model.device)
         context_length = context_ids.shape[1]
 
-        if isinstance(press, (FinchPress, FinchPressTSNaive,FinchPressWTS)) or isinstance(getattr(press, "press", None), (FinchPress,FinchPressTSNaive,FinchPressWTS)):
+        if isinstance(press, (FinchPress, FinchPressTSNaive,FinchPressWCS,FinchPressWTS)) or isinstance(getattr(press, "press", None), (FinchPress,FinchPressTSNaive,FinchPressWCS,FinchPressWTS)):
             # finch press cannot be done with multiple questions
             assert len(input_tensors["questions_ids"]) == 1, "Finch press cannot be done with multiple questions"
             question_ids = input_tensors["questions_ids"][0].to(self.model.device)
@@ -207,10 +208,10 @@ class KVPressTextGenerationPipeline(Pipeline):
         logger.debug(f"Context Length: {context_length}")
         logger.debug(f"Compressed Context Length: {cache.get_seq_length()}")
 
-        
+
         print(cache)
 
-    
+
         print(context_ids)
 
         # Greedy decoding for each question
@@ -220,7 +221,7 @@ class KVPressTextGenerationPipeline(Pipeline):
                 question_ids=question_ids.to(self.model.device),
                 cache=cache,
                 context_length=(
-                    cache.get_seq_length() if isinstance(press, (KeyRerotationPress, FinchPress, FinchPressTSNaive,FinchPressWTS)) else context_length
+                    cache.get_seq_length() if isinstance(press, (KeyRerotationPress, FinchPress, FinchPressTSNaive,FinchPressWCS,FinchPressWTS)) else context_length
                 ),
                 max_new_tokens=max_new_tokens,
             )
