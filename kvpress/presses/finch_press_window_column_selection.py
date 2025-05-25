@@ -136,9 +136,6 @@ class FinchPressWCS(BasePress):
 
         head_kept_token_sets = [set(batch_top_indices[head].tolist()) for head in range(num_heads)]
         head_kept_tuple_indices = [set() for _ in range(num_heads)]  # which token positions to keep per head
-
-        import random  # import once at top
-
         for head in range(num_heads):
             print("############################ new head ##########################", head)
             important_tokens = head_kept_token_sets[head]
@@ -150,15 +147,20 @@ class FinchPressWCS(BasePress):
 
                 # Computing tuple index of the token
                 tuple_idx = None
+                token_offset = None
                 for i, (start, end) in enumerate(tuple_ranges):
                     if start <= token < end:
                         tuple_idx = i
+                        token_offset = token - start
                         break
-                if tuple_idx is None:
-                    continue  # token out of bounds, skip
-                print("tuple_idx: ", tuple_idx)
 
-                print(n_kept_context, "n_kept_context")
+                if tuple_idx is None:
+                    continue
+
+                print("tuple_idx: ", tuple_idx)
+                print("column_offset_in_tuple: ", token_offset)
+
+                """print(n_kept_context, "n_kept_context")
                 tuples_to_visit = n_kept_context // 2  # number of tuples to consider around the current token
                 print("window_per_side: ", tuples_to_visit)
 
@@ -188,10 +190,28 @@ class FinchPressWCS(BasePress):
                     current_num_tokens += (n_kept_context - current_num_tokens)
                     print("current_num_tokens after partial add: ", current_num_tokens)
                     break
+                """
 
-                print(head_kept_tuple_indices[head])
+
+                selected = [token]
+
+                # Compute how many tuples to include on each side
+                window_size = (n_kept_context - current_num_tokens - 1) // 2
+                left_bound = max(0, tuple_idx - window_size)
+                right_bound = min(len(tuple_ranges), tuple_idx + window_size + 1)  # +1 for inclusive range
+
+                # Add positions from tuples to the left and right (excluding current)
+                for i in range(left_bound, right_bound):
+                    if i == tuple_idx:
+                        continue
+                    start, end = tuple_ranges[i]
+                    if start + token_offset < end:
+                        selected.append(start + token_offset)
+
+                print("Added tokens:", selected)
                 print("current_num_tokens: ", current_num_tokens)
-                if current_num_tokens==n_kept_context:
+
+                if current_num_tokens >= n_kept_context:
                     break
 
         head_kept_tuple_indices = [sorted(list(kept_tokens)) for kept_tokens in head_kept_tuple_indices]
