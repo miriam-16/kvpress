@@ -20,7 +20,7 @@ from kvpress.presses.per_layer_compression_press import PerLayerCompressionPress
 from kvpress.presses.qfilter_press import QFilterPress
 from kvpress.presses.random_press import RandomPress
 from kvpress.presses.scorer_press import ScorerPress
-from kvpress.presses.simlayerkv_press import SimLayerKVPress
+#from kvpress.presses.simlayerkv_press import SimLayerKVPress
 from kvpress.presses.snapkv_press import SnapKVPress
 from kvpress.presses.streaming_llm_press import StreamingLLMPress
 from kvpress.presses.think_press import ThinKPress
@@ -28,6 +28,7 @@ from kvpress.presses.tova_press import TOVAPress
 from kvpress.presses.finch_press_tuple_selection_naive import FinchPressTSNaive
 from kvpress.presses.finch_press_window_tuple_selection import FinchPressWTS
 from kvpress.presses.finch_press_window_column_selection import FinchPressWCS
+from kvpress.presses.finch_press_tuplecolumn_selection import FinchPressTCSNaive
 
 
 # Patch the attention functions to support head-wise compression
@@ -60,4 +61,5 @@ __all__ = [
     "FinchPressTSNaive",
     "FinchPressWTS",
     "FinchPressWCS",
+    "FinchPressTCSNaive",
 ]
