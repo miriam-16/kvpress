@@ -29,7 +29,7 @@ from kvpress.presses.finch_press_tuple_selection_naive import FinchPressTSNaive
 from kvpress.presses.finch_press_window_tuple_selection import FinchPressWTS
 from kvpress.presses.finch_press_window_column_selection import FinchPressWCS
 from kvpress.presses.finch_press_tuplecolumn_selection import FinchPressTCSNaive
-
+from kvpress.presses.finch_press_heads_average_tupleselection import FinchPressTSHavg
 
 # Patch the attention functions to support head-wise compression
 patch_attention_functions()
@@ -62,4 +62,5 @@ __all__ = [
     "FinchPressWTS",
     "FinchPressWCS",
     "FinchPressTCSNaive",
+    "FinchPressTSHavg"
 ]
