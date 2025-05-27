@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 
 import torch
 from transformers import pipeline
-from kvpress import FinchPress, KeyRerotationPress, SnapKVPress, FinchPressTSNaive,FinchPressWTS, FinchPressWCS,FinchPressTCSNaive, FinchPressTSHavg, FinchPressTWSHavg,FinchPressTSHavgPrecise,FinchPressTCSNaiveHavg
+from kvpress import FinchPress, KeyRerotationPress, SnapKVPress, FinchPressTSNaive,FinchPressWTS, FinchPressWCS,FinchPressTCSNaive, FinchPressTSHavg, FinchPressTWSHavg,FinchPressTSHavgPrecise,FinchPressTCSNaiveHavg, FinchPressCWSHavg
 
 
 
@@ -22,7 +22,7 @@ print("MODEL LOADED")
 
 
 
-press= FinchPressTCSNaiveHavg(compression_ratio=0.8, split_size=1)
+press= FinchPressCWSHavg(compression_ratio=0.8, split_size=1)
 
 #press=SnapKVPress(compression_ratio=0.1,window_size=3)
 answer = pipe(context, question=question, press=press)["answer"]

@@ -24,6 +24,7 @@ from kvpress.presses.finch_press_heads_average_tupleselectionnaive import FinchP
 from kvpress.presses.finch_press_heads_average_tupleselectionwindow import FinchPressTWSHavg
 from kvpress.presses.finch_press_heads_average_tupleselectionprecise import FinchPressTSHavgPrecise
 from kvpress.presses.finch_press_heads_average_tuplecolumnselection import FinchPressTCSNaiveHavg
+from kvpress.presses.finch_press_heads_average_columnselectionwindow import FinchPressCWSHavg
 
 logger = logging.getLogger(__name__)
 
@@ -190,7 +191,7 @@ class KVPressTextGenerationPipeline(Pipeline):
         context_ids = input_tensors["context_ids"].to(self.model.device)
         context_length = context_ids.shape[1]
 
-        if isinstance(press, (FinchPress, FinchPressTSNaive,FinchPressWCS,FinchPressWTS,FinchPressTCSNaive,FinchPressTSHavg,FinchPressTWSHavg,FinchPressTSHavgPrecise,FinchPressTCSNaiveHavg)) or isinstance(getattr(press, "press", None), (FinchPress,FinchPressTSNaive,FinchPressWCS,FinchPressWTS,FinchPressTCSNaive,FinchPressTSHavg,FinchPressTWSHavg,FinchPressTSHavgPrecise,FinchPressTCSNaiveHavg)):
+        if isinstance(press, (FinchPress, FinchPressTSNaive,FinchPressWCS,FinchPressWTS,FinchPressTCSNaive,FinchPressTSHavg,FinchPressTWSHavg,FinchPressCWSHavg,FinchPressTSHavgPrecise,FinchPressTCSNaiveHavg)) or isinstance(getattr(press, "press", None), (FinchPress,FinchPressTSNaive,FinchPressWCS,FinchPressWTS,FinchPressTCSNaive,FinchPressTSHavg,FinchPressTWSHavg,FinchPressCWSHavg,FinchPressTSHavgPrecise,FinchPressTCSNaiveHavg)):
             # finch press cannot be done with multiple questions
             assert len(input_tensors["questions_ids"]) == 1, "Finch press cannot be done with multiple questions"
             question_ids = input_tensors["questions_ids"][0].to(self.model.device)
@@ -226,7 +227,7 @@ class KVPressTextGenerationPipeline(Pipeline):
                 question_ids=question_ids.to(self.model.device),
                 cache=cache,
                 context_length=(
-                    cache.get_seq_length() if isinstance(press, (KeyRerotationPress, FinchPress, FinchPressTSNaive,FinchPressWCS,FinchPressWTS,FinchPressTCSNaive,FinchPressTSHavg,FinchPressTWSHavg,FinchPressTSHavgPrecise,FinchPressTCSNaiveHavg)) else context_length
+                    cache.get_seq_length() if isinstance(press, (KeyRerotationPress, FinchPress, FinchPressTSNaive,FinchPressWCS,FinchPressWTS,FinchPressTCSNaive,FinchPressTSHavg,FinchPressTWSHavg,FinchPressCWSHavg,FinchPressTSHavgPrecise,FinchPressTCSNaiveHavg)) else context_length
                 ),
                 max_new_tokens=max_new_tokens,
             )

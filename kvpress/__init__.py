@@ -33,6 +33,7 @@ from kvpress.presses.finch_press_heads_average_tupleselectionnaive import FinchP
 from kvpress.presses.finch_press_heads_average_tupleselectionwindow import FinchPressTWSHavg
 from kvpress.presses.finch_press_heads_average_tupleselectionprecise import FinchPressTSHavgPrecise
 from kvpress.presses.finch_press_heads_average_tuplecolumnselection import FinchPressTCSNaiveHavg
+from kvpress.presses.finch_press_heads_average_columnselectionwindow import FinchPressCWSHavg
 
 
 # Patch the attention functions to support head-wise compression
@@ -68,6 +69,7 @@ __all__ = [
     "FinchPressTCSNaive",
     "FinchPressTSHavg",
     "FinchPressTWSHavg",
+    "FinchPressCWSHavg",
     "FinchPressTSHavgPrecise",
     "FinchPressTCSNaiveHavg"
 ]
