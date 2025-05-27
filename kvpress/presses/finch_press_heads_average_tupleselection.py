@@ -17,7 +17,7 @@ from kvpress.presses.snapkv_press import SnapKVPress
 
 
 @dataclass
-class FinchPress(BasePress):
+class FinchPressTSHavg(BasePress):
     """
     Finch uses the attention information between the prompt and the document chunk to dynamically
     identify the most relevant KV pairs across different layers.
@@ -51,13 +51,22 @@ class FinchPress(BasePress):
             non_zero_counts = non_zero_counts.to(attn_weights.device)
             attn_weights = attn_weights * non_zero_counts
 
+        if module.layer_idx == 0:
+            print("attn_weights shape: ", attn_weights.shape)
         # Average per group
         scores = attn_weights.mean(dim=-2)
         scores = scores.view(bsz, num_key_value_heads, num_key_value_groups, q_len - self.condition_len)
+        if module.layer_idx == 0:
+            print("scores shape before group average: ", scores.shape)
         scores = scores.mean(dim=2)
+        if module.layer_idx == 0:
+            print("scores shape after group average: ", scores.shape)
 
         # Add back the observation window. Use max score to make sure the window is not pruned.
         scores = F.pad(scores, (0, self.condition_len), value=scores.max().item())
+
+        if module.layer_idx == 0:  
+            print("scores shape: ", scores.shape)
         return scores
 
     @staticmethod
@@ -108,8 +117,12 @@ class FinchPress(BasePress):
             past_cache_len = scores.shape[-1] - q_len
             n_kept_context = int((q_len - self.condition_len) * (1 - self.compression_ratio)) + past_cache_len
 
+
         #NEW PART 
         #_______________________________________________________________#
+
+        #compute the mean of the scores across all heads
+        scores_avg = scores.mean(dim=1)  # shape: (batch_size, seq_len)
 
         input_ids = self.current_input_ids  # shape: (seq_len,)
         tokenizer = self.tokenizer
@@ -118,80 +131,90 @@ class FinchPress(BasePress):
         #Identify token positions for each tuple
         tuple_end_positions = (input_ids == tuple_end_token_id).nonzero(as_tuple=True)[1]
 
+
         tuple_ranges = []
         start = 0
+        tuple_lengths=[]
         for end in tuple_end_positions:
             tuple_ranges.append((start, end.item() + 1))  # include <tuple_end>
+            #compute the length of the tuple
+            tuple_lengths.append(end.item() - start + 1)  # length of the tuple
             start = end.item() + 1
 
-        k = scores.shape[-1] - self.condition_len
-        top_indices = scores[:, :, :-self.condition_len].topk(k, dim=-1).indices
+            
+        #compute the average length of the tuples: 
+        avg_tuple_length = sum(tuple_lengths) / len(tuple_lengths) if tuple_lengths else 0
 
-        #top_indices = scores[:, :, :-self.condition_len].topk(n_kept_context, dim=-1).indices  #get the top indices
-        important_token_set = set(top_indices.flatten().tolist())  #save the most important tokens in a set
+        if module.layer_idx == 0:
+            print("avg_tuple_length: ", avg_tuple_length)
+
+        #retrieve all tokens ordered by importance
+        k = scores_avg.shape[-1] - self.condition_len
+        top_indices = scores_avg[:, :-self.condition_len].topk(k, dim=-1).indices
+        #top_indices = scores_avg[:, :-self.condition_len].topk(n_kept_context, dim=-1).indices  #get the top indices, REMOVED 
         
         batch_top_indices=top_indices[0]
-        num_heads=top_indices.shape[1]
+        head_kept_token_sets = set(batch_top_indices.tolist()) #store all tokens in a set to avoid duplicates
 
-        head_kept_token_sets = [set(batch_top_indices[head].tolist()) for head in range(num_heads)]
-        head_kept_tuple_indices = [set() for _ in range(num_heads)]  # which token positions to keep per head
+        head_kept_tuple_indices = set()  # check the tokens already stored
 
-        for head in range(num_heads):
-            important_tokens = head_kept_token_sets[head]
-            tuples_inserted=set()
-            current_num_tokens = 0
+        important_tokens = head_kept_token_sets
+        tuples_inserted=set() # store the index of the tuple 
+        current_num_tokens = 0
 
-            for token in important_tokens:
-                print("new important token: ",token)
-                i=0
-                for start, end in tuple_ranges: 
-                    if token in range(start, end):
-                        tuple_size = end - start
-                        if current_num_tokens + tuple_size <= n_kept_context and i not in tuples_inserted:
-                            head_kept_tuple_indices[head].update(range(start, end))
-                            current_num_tokens += tuple_size
-                            #print("added: ",tuple_size)
-                            tuples_inserted.add(i)
-                        elif i not in tuples_inserted:
-                            # If adding the whole tuple would exceed the max tokens, only add the necessary tokens
-                            tokens_needed = n_kept_context - current_num_tokens
-                            
-                            head_kept_tuple_indices[head].update(range(start, start + tokens_needed))
-                            
-                            current_num_tokens += tokens_needed
-                
-                            tuples_inserted.add(i)
-                            break  # Move to the next important token
-                    i+=1
-                if current_num_tokens >= n_kept_context:
-                    break
-            print("final number of tokens: ",current_num_tokens)
-            print("final_len: ",len(head_kept_tuple_indices[head]))
+        #print("important tokens: ", important_tokens)
 
+        for token in important_tokens:
+            #print("token: ", token)
+            index_of_tuple_to_keep=int(token/avg_tuple_length) #find which tuple this token belongs to
 
-            """current_num_tokens = len(head_kept_tuple_indices[head])
+            #check if we are considering last tuple, and adjust
+            if index_of_tuple_to_keep>=len(tuple_ranges):
+                index_of_tuple_to_keep=len(tuple_ranges)-1
 
-            for start, end in tuple_ranges:
-                if any(pos in important_tokens for pos in range(start, end)):
-
-                    tuple_size = end - start
-                    if current_num_tokens + tuple_size <= n_kept_context:
-                        head_kept_tuple_indices[head].update(range(start, end))
-                        current_num_tokens += tuple_size
-                    else:
-                        # If adding the whole tuple would exceed the max tokens, only add the necessary tokens
-                        tokens_needed = n_kept_context - current_num_tokens
-                        head_kept_tuple_indices[head].update(range(start, start + tokens_needed))
-                        current_num_tokens += tuple_size"""
+            #print("index_of_tuple_to_keep: ", index_of_tuple_to_keep)
             
+            if index_of_tuple_to_keep not in tuples_inserted:
+                tuple_to_consider=tuple_ranges[index_of_tuple_to_keep]
+                start, end = tuple_to_consider
+                tuple_size = end - start
+                
+                if current_num_tokens + tuple_size <= n_kept_context:
+                    head_kept_tuple_indices.update(range(start, end)) #insert the whole tuple
+                    tuples_inserted.add(index_of_tuple_to_keep) # mark this tuple as inserted
+                    current_num_tokens += tuple_size
+
+                    #print("added full: ",index_of_tuple_to_keep, "range: ", start, end)
+                elif current_num_tokens<n_kept_context:
+                    tokens_needed = n_kept_context - current_num_tokens
+
+                    tuples_inserted.add(index_of_tuple_to_keep)
+                    head_kept_tuple_indices.update(range(start, start + tokens_needed))
+                    current_num_tokens += tokens_needed
+
+                    #print("added partial: ",index_of_tuple_to_keep, "range: ", start, start + tokens_needed)
+
+                    break
+
+            #added for stopping earlier 
+            if current_num_tokens==n_kept_context:
+                    break
+    
+            #print("current_num_tokens: ", current_num_tokens)
+            #print(len(tuples_inserted))
+            #print("___________________________________________________")
+
+        
+        #print("final number of tokens: ",current_num_tokens)
+        #print("final_len: ",head_kept_tuple_indices[head])
+        
         print("FINISHED")
 
-        head_kept_tuple_indices = [sorted(list(kept_tokens)) for kept_tokens in head_kept_tuple_indices]
-
+        #transform it back to a list of sets
+        head_kept_tuple_indices = [sorted(list(head_kept_tuple_indices)) for _ in range(3)]
+        
         head_kept_tuple_indices = torch.tensor(head_kept_tuple_indices)
-        print(head_kept_tuple_indices.shape)
         indices_context = head_kept_tuple_indices.unsqueeze(0).expand(self.split_size, -1, -1)
-        print(indices_context.shape)
 
         #_______________________________________________________________#
         #END OF NEW PART

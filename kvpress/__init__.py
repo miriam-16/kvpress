@@ -12,7 +12,7 @@ from kvpress.presses.composed_press import ComposedPress
 from kvpress.presses.criticalkv_press import CriticalAdaKVPress, CriticalKVPress
 from kvpress.presses.duo_attention_press import DuoAttentionPress
 from kvpress.presses.expected_attention_press import ExpectedAttentionPress
-from kvpress.presses.finch_press import FinchPress
+from kvpress.presses.finch_press_tuple_selection_precise import FinchPress
 from kvpress.presses.key_rerotation_press import KeyRerotationPress
 from kvpress.presses.knorm_press import KnormPress
 from kvpress.presses.observed_attention_press import ObservedAttentionPress
@@ -29,6 +29,10 @@ from kvpress.presses.finch_press_tuple_selection_naive import FinchPressTSNaive
 from kvpress.presses.finch_press_window_tuple_selection import FinchPressWTS
 from kvpress.presses.finch_press_window_column_selection import FinchPressWCS
 from kvpress.presses.finch_press_tuplecolumn_selection import FinchPressTCSNaive
+from kvpress.presses.finch_press_heads_average_tupleselectionnaive import FinchPressTSHavg
+from kvpress.presses.finch_press_heads_average_tupleselectionwindow import FinchPressTWSHavg
+from kvpress.presses.finch_press_heads_average_tupleselectionprecise import FinchPressTSHavgPrecise
+from kvpress.presses.finch_press_heads_average_tuplecolumnselection import FinchPressTCSNaiveHavg
 
 
 # Patch the attention functions to support head-wise compression
@@ -62,4 +66,8 @@ __all__ = [
     "FinchPressWTS",
     "FinchPressWCS",
     "FinchPressTCSNaive",
+    "FinchPressTSHavg",
+    "FinchPressTWSHavg",
+    "FinchPressTSHavgPrecise",
+    "FinchPressTCSNaiveHavg"
 ]

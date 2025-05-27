@@ -140,9 +140,10 @@ class FinchPressWTS(BasePress):
         avg_tuple_length = sum(tuple_lengths) / len(tuple_lengths) if tuple_lengths else 0
 
         #print("average tuple length: ",avg_tuple_length)
-
-        top_indices = scores[:, :, :-self.condition_len].topk(n_kept_context, dim=-1).indices  #get the top indices
-        important_token_set = set(top_indices.flatten().tolist())  #save the most important tokens in a set
+        
+        k = scores.shape[-1] - self.condition_len
+        top_indices = scores[:, :, :-self.condition_len].topk(k, dim=-1).indices
+        #top_indices = scores[:, :, :-self.condition_len].topk(n_kept_context, dim=-1).indices  #get the top indices
         
         batch_top_indices=top_indices[0]
         num_heads=top_indices.shape[1]

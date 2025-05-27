@@ -128,7 +128,6 @@ class FinchPress(BasePress):
         top_indices = scores[:, :, :-self.condition_len].topk(k, dim=-1).indices
 
         #top_indices = scores[:, :, :-self.condition_len].topk(n_kept_context, dim=-1).indices  #get the top indices
-        important_token_set = set(top_indices.flatten().tolist())  #save the most important tokens in a set
         
         batch_top_indices=top_indices[0]
         num_heads=top_indices.shape[1]
