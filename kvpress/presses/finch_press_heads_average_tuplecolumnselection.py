@@ -18,7 +18,7 @@ from kvpress.presses.snapkv_press import SnapKVPress
 
 
 @dataclass
-class FinchPressWTS(BasePress):
+class FinchPressTCSNaiveHavg(BasePress):
     """
     Finch uses the attention information between the prompt and the document chunk to dynamically
     identify the most relevant KV pairs across different layers.
@@ -52,13 +52,20 @@ class FinchPressWTS(BasePress):
             non_zero_counts = non_zero_counts.to(attn_weights.device)
             attn_weights = attn_weights * non_zero_counts
 
+        if module.layer_idx == 0:
+            print("attn_weights shape: ", attn_weights.shape)
         # Average per group
         scores = attn_weights.mean(dim=-2)
         scores = scores.view(bsz, num_key_value_heads, num_key_value_groups, q_len - self.condition_len)
+        if module.layer_idx == 0:
+            print("scores shape before group average: ", scores.shape)
         scores = scores.mean(dim=2)
+        if module.layer_idx == 0:
+            print("scores shape after group average: ", scores.shape)
 
         # Add back the observation window. Use max score to make sure the window is not pruned.
         scores = F.pad(scores, (0, self.condition_len), value=scores.max().item())
+
         return scores
 
     @staticmethod
@@ -103,17 +110,18 @@ class FinchPressWTS(BasePress):
         last_iteration = kwargs["split_idx"] == self.split_size - 1
         q_len = hidden_states.shape[1]
 
-        #print("split_idx: ", kwargs["split_idx"])
-        #print("layer: ", module.layer_idx)
-
         if last_iteration:
             n_kept_context = int(context_length * (1 - self.compression_ratio))
         else:
             past_cache_len = scores.shape[-1] - q_len
             n_kept_context = int((q_len - self.condition_len) * (1 - self.compression_ratio)) + past_cache_len
 
+
         #NEW PART 
         #_______________________________________________________________#
+
+        #compute the mean of the scores across all heads
+        scores_avg = scores.mean(dim=1)  # shape: (batch_size, seq_len)
 
         input_ids = self.current_input_ids  # shape: (seq_len,)
         tokenizer = self.tokenizer
@@ -130,109 +138,108 @@ class FinchPressWTS(BasePress):
             tuple_ranges.append((start, end.item() + 1))  # include <tuple_end>
             #compute the length of the tuple
             tuple_lengths.append(end.item() - start + 1)  # length of the tuple
-
             start = end.item() + 1
 
-            
-        #compute the average length of the tuples: 
-
-        #print(tuple_lengths)
         avg_tuple_length = sum(tuple_lengths) / len(tuple_lengths) if tuple_lengths else 0
 
-        #print("average tuple length: ",avg_tuple_length)
-        
-        k = scores.shape[-1] - self.condition_len
-        top_indices = scores[:, :, :-self.condition_len].topk(k, dim=-1).indices
-        #top_indices = scores[:, :, :-self.condition_len].topk(n_kept_context, dim=-1).indices  #get the top indices
+        #retrieve all tokens ordered by importance
+        k = scores_avg.shape[-1] - self.condition_len
+        top_indices = scores_avg[:, :-self.condition_len].topk(k, dim=-1).indices
+        #top_indices = scores_avg[:, :-self.condition_len].topk(n_kept_context, dim=-1).indices  #get the top indices, REMOVED 
         
         batch_top_indices=top_indices[0]
-        num_heads=top_indices.shape[1]
 
-        head_kept_token_sets = [set(batch_top_indices[head].tolist()) for head in range(num_heads)]
-        head_kept_tuple_indices = [set() for _ in range(num_heads)]  # which token positions to keep per head
+        head_kept_token_sets = set(batch_top_indices.tolist()) #store all tokens in a set to avoid duplicates
+        head_kept_tuple_indices = set()  # check the tokens already stored
 
-
-        # Iterate over the important tokens and assign them to the corresponding 
-        
-        
-
-        for head in range(num_heads):
-
-            print("############################new head##########################", head)
-            important_tokens = head_kept_token_sets[head]
-            tuples_inserted=set()
-            current_num_tokens = 0
-
-            print("important tokens: ", important_tokens)
-
-            for token in important_tokens:
-                print("***token:*** ", token)
-
-                window_per_side=int(avg_tuple_length//2)
-                print("window_per_side: ", window_per_side)
-
-                if token+window_per_side>=sum(tuple_lengths):
-                    to_keep_on_right=sum(tuple_lengths)-token
-                    to_keep_on_left=2*window_per_side-to_keep_on_right
-
-                elif token-window_per_side<0:
-                    to_keep_on_left=token
-                    to_keep_on_right=2*window_per_side-to_keep_on_left
-                
-                else:
-                    to_keep_on_left=window_per_side
-                    to_keep_on_right=window_per_side
-
-                indices = torch.arange(token - to_keep_on_left, token + to_keep_on_right + 1)
-                
-                indices_set = set(indices.tolist())
-
-                common = head_kept_tuple_indices[head] & indices_set  #compute intersection
-                #remove common elements from the set 
+        important_tokens = head_kept_token_sets
+        current_num_tokens = 0
 
 
-                to_add = len(indices_set)-len(common)
+        tuples_inserted=set()
+        columns_inserted=set()
 
-                indices_set = indices_set - common
-                print("to_add: ", to_add)
+        #print("important tokens: ", important_tokens) 
 
-                if current_num_tokens+to_add<n_kept_context and to_add!=0:
-                    #add
-                    print("add full: ",current_num_tokens,"--->", current_num_tokens+to_add)
-                    current_num_tokens+=to_add
-                    head_kept_tuple_indices[head].update(list(indices_set))
-                    print(len(head_kept_tuple_indices[head]))
+        for token in important_tokens:
+            #break if reached maximum number of tokens to keep
+            if current_num_tokens>=n_kept_context:
+                break
+            
+            #print("token: ", token)
+            
+            index_of_tuple_to_keep=int(token/avg_tuple_length)
 
-                
+            #check if we are considering last tuple, aviod errors
+            if index_of_tuple_to_keep>=len(tuple_ranges):
+                index_of_tuple_to_keep=len(tuple_ranges)-1
 
-                elif current_num_tokens+to_add>=n_kept_context:
-                    #add only some of them 
-                    
+            #print("index_of_tuple_to_keep: ", index_of_tuple_to_keep)
+            
+            if index_of_tuple_to_keep not in tuples_inserted:
+                tuple_to_consider=tuple_ranges[index_of_tuple_to_keep]
+                start, end = tuple_to_consider
+
+                tuple_size = end - start
+                if current_num_tokens + tuple_size <= n_kept_context:
+                    head_kept_tuple_indices.update(range(start, end))
+                    tuples_inserted.add(index_of_tuple_to_keep)
+
+                    current_num_tokens += tuple_size
+                    #print("added full tuple: ",index_of_tuple_to_keep, "range: ", start, end)
+                elif current_num_tokens<n_kept_context:
                     tokens_needed = n_kept_context - current_num_tokens
 
-                    print("add partial: ",current_num_tokens,"--->", current_num_tokens+tokens_needed)
+                    head_kept_tuple_indices.update(range(start, start + tokens_needed))
+                    tuples_inserted.add(index_of_tuple_to_keep)
 
-                    random_elements = random.sample(indices_set, tokens_needed)
-
-                    #random_elements.append(token)
-                    #add token
-                    head_kept_tuple_indices[head].update(random_elements)
-                    current_num_tokens+=tokens_needed
-                    print(len(head_kept_tuple_indices[head]))
-
+                    current_num_tokens += tokens_needed
+                    #print("added partial tuple: ",index_of_tuple_to_keep, "range: ", start, start + tokens_needed)
                     break
-                print(head_kept_tuple_indices[head])
-                print("current_num_tokens: ", current_num_tokens)
+                
+                #move to column selection
+                
+                tuple_idx = None
+                token_offset = None
 
-                if current_num_tokens==n_kept_context:
-                    break
+                #compute approximate tuple containing the token 
+                approx_tuple_idx= int(token / avg_tuple_length)
+                print("approx_tuple_idx: ", approx_tuple_idx)
+
+                start_checking=max( 0, approx_tuple_idx - 1) #check also previous tuple 
+                end_checking=min(len(tuple_ranges), approx_tuple_idx + 2) #check also next tuple 
+
+                #slice the tuple ranges to check only the relevant tuples
+                tuple_ranges_to_check = tuple_ranges[start_checking:end_checking]
+
+                tuple_idx=start_checking
+                for (start, end) in tuple_ranges_to_check:
+                    if start <= token < end:
+                        token_offset = token - start
+                        break
+                    tuple_idx += 1
+
+                if token_offset is not None and token_offset not in columns_inserted:
+                    print("found a column for tuple: ", token_offset)
+                    #add the tokens in that column
+                    for i in range(0,len(tuple_ranges)):
+                        if current_num_tokens>=n_kept_context:
+                            break
+
+                        if i * avg_tuple_length + token_offset not in head_kept_tuple_indices:
+                            head_kept_tuple_indices.add(int(i * avg_tuple_length + token_offset))
+                            columns_inserted.add(token_offset)
+
+                            current_num_tokens += 1
+
+                            #print("add element : ", int(i * avg_tuple_length + token_offset))
+
+        print("FINISHED")
+
+        #transform it back to a list of sets
+        head_kept_tuple_indices = [sorted(list(head_kept_tuple_indices)) for _ in range(3)]
         
-        
-
-        head_kept_tuple_indices = [sorted(list(kept_tokens)) for kept_tokens in head_kept_tuple_indices]
-
         head_kept_tuple_indices = torch.tensor(head_kept_tuple_indices)
-        print(head_kept_tuple_indices.shape)
         indices_context = head_kept_tuple_indices.unsqueeze(0).expand(self.split_size, -1, -1)
 
         #_______________________________________________________________#
@@ -247,6 +254,9 @@ class FinchPressWTS(BasePress):
             None, None, :
         ].expand(scores.shape[0], scores.shape[1], -1)
         indices_context, _ = torch.sort(indices_context, dim=-1)
+
+        print("indices_context shape: ", indices_context.shape)
+        print("indices_condition shape: ", indices_condition.shape)
 
         # concatenate the indices
         indices = torch.cat([indices_context, indices_condition], dim=-1)

@@ -135,7 +135,7 @@ class FinchPressTCSNaive(BasePress):
             
         #compute the average length of the tuples: 
 
-        print(tuple_lengths)
+        #print(tuple_lengths)
         avg_tuple_length = sum(tuple_lengths) / len(tuple_lengths) if tuple_lengths else 0
 
         print("average tuple length: ",avg_tuple_length)
