@@ -25,6 +25,7 @@ from kvpress.presses.finch_press_heads_average_tupleselectionwindow import Finch
 from kvpress.presses.finch_press_heads_average_tupleselectionprecise import FinchPressTSHavgPrecise
 from kvpress.presses.finch_press_heads_average_tuplecolumnselection import FinchPressTCSNaiveHavg
 from kvpress.presses.finch_press_heads_average_columnselectionwindow import FinchPressCWSHavg
+from kvpress.presses.finch_press_keep_structural_tokens_TSHAvgd import FinchPressKeepStructuralTokensForTSHAvg
 
 logger = logging.getLogger(__name__)
 
@@ -112,10 +113,31 @@ class KVPressTextGenerationPipeline(Pipeline):
 
 
         tuple_end_token = "<tuple_end>"
+        header_token= "<header>"
+
 
         if "<tuple_end>" not in self.tokenizer.special_tokens_map:
             self.tokenizer.add_special_tokens({'additional_special_tokens': ['<tuple_end>']})
             self.model.resize_token_embeddings(len(self.tokenizer))
+        if "<header>" not in self.tokenizer.special_tokens_map:
+            self.tokenizer.add_special_tokens({'additional_special_tokens': ['<header>']})
+            self.model.resize_token_embeddings(len(self.tokenizer))
+
+        open_bracket_token = self.tokenizer.convert_tokens_to_ids("[")
+        close_bracket_token = self.tokenizer.convert_tokens_to_ids("]")
+
+        if open_bracket_token == self.tokenizer.unk_token_id:
+            self.tokenizer.add_special_tokens({'additional_special_tokens': ['[']})
+            self.model.resize_token_embeddings(len(self.tokenizer))
+        if close_bracket_token == self.tokenizer.unk_token_id:
+            self.tokenizer.add_special_tokens({'additional_special_tokens': [']']})
+            self.model.resize_token_embeddings(len(self.tokenizer))
+
+        comma_token= self.tokenizer.convert_tokens_to_ids(",")
+        if comma_token == self.tokenizer.unk_token_id:
+            self.tokenizer.add_special_tokens({'additional_special_tokens': [","]})
+            self.model.resize_token_embeddings(len(self.tokenizer))
+
 
 
         # Apply chat template if available
@@ -191,7 +213,19 @@ class KVPressTextGenerationPipeline(Pipeline):
         context_ids = input_tensors["context_ids"].to(self.model.device)
         context_length = context_ids.shape[1]
 
-        if isinstance(press, (FinchPress, FinchPressTSNaive,FinchPressWCS,FinchPressWTS,FinchPressTCSNaive,FinchPressTSHavg,FinchPressTWSHavg,FinchPressCWSHavg,FinchPressTSHavgPrecise,FinchPressTCSNaiveHavg)) or isinstance(getattr(press, "press", None), (FinchPress,FinchPressTSNaive,FinchPressWCS,FinchPressWTS,FinchPressTCSNaive,FinchPressTSHavg,FinchPressTWSHavg,FinchPressCWSHavg,FinchPressTSHavgPrecise,FinchPressTCSNaiveHavg)):
+        mypresses=(FinchPress,
+                    FinchPressTSNaive,
+                    FinchPressWCS,
+                    FinchPressWTS,
+                    FinchPressTCSNaive,
+                    FinchPressTSHavg,
+                    FinchPressTWSHavg,
+                    FinchPressCWSHavg,
+                    FinchPressTSHavgPrecise,
+                    FinchPressTCSNaiveHavg,
+                    FinchPressKeepStructuralTokensForTSHAvg)
+
+        if isinstance(press,mypresses ) or isinstance(getattr(press, "press", None), mypresses):
             # finch press cannot be done with multiple questions
             assert len(input_tensors["questions_ids"]) == 1, "Finch press cannot be done with multiple questions"
             question_ids = input_tensors["questions_ids"][0].to(self.model.device)
@@ -227,7 +261,7 @@ class KVPressTextGenerationPipeline(Pipeline):
                 question_ids=question_ids.to(self.model.device),
                 cache=cache,
                 context_length=(
-                    cache.get_seq_length() if isinstance(press, (KeyRerotationPress, FinchPress, FinchPressTSNaive,FinchPressWCS,FinchPressWTS,FinchPressTCSNaive,FinchPressTSHavg,FinchPressTWSHavg,FinchPressCWSHavg,FinchPressTSHavgPrecise,FinchPressTCSNaiveHavg)) else context_length
+                    cache.get_seq_length() if isinstance(press, (KeyRerotationPress,) + mypresses) else context_length
                 ),
                 max_new_tokens=max_new_tokens,
             )
