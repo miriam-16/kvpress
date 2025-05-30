@@ -141,12 +141,12 @@ class FinchPressTSNaive(BasePress):
         print("average tuple length: ",avg_tuple_length)
 
         top_indices = scores[:, :, :-self.condition_len].topk(n_kept_context, dim=-1).indices  #get the top indices
-        important_token_set = set(top_indices.flatten().tolist())  #save the most important tokens in a set
+        
         
         batch_top_indices=top_indices[0]
         num_heads=top_indices.shape[1]
 
-        head_kept_token_sets = [set(batch_top_indices[head].tolist()) for head in range(num_heads)]
+        head_kept_token_sets = [batch_top_indices[head].tolist() for head in range(num_heads)]
         head_kept_tuple_indices = [set() for _ in range(num_heads)]  # which token positions to keep per head
 
 

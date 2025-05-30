@@ -154,7 +154,7 @@ class FinchPressTSHavg(BasePress):
         #top_indices = scores_avg[:, :-self.condition_len].topk(n_kept_context, dim=-1).indices  #get the top indices, REMOVED 
         
         batch_top_indices=top_indices[0]
-        head_kept_token_sets = set(batch_top_indices.tolist()) #store all tokens in a set to avoid duplicates
+        head_kept_token_sets = batch_top_indices.tolist() #store all tokens in a set to avoid duplicates
 
         head_kept_tuple_indices = set()  # check the tokens already stored
 
