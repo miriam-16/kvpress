@@ -117,24 +117,17 @@ class FinchPressKeepStructuralTokensForTSHAvg(BasePress):
 
         input_ids = self.current_input_ids  # shape: (seq_len,)
 
-        if module.layer_idx == 0:
-            print("input_ids shape: ", input_ids.shape)
-
         tokenizer = self.tokenizer
+
+        #find important tokens in the input_ids
         tuple_end_token_id = tokenizer.convert_tokens_to_ids("<tuple_end>") #retrieve the token of the separator
         header_token_id= tokenizer.convert_tokens_to_ids("<header>")  # retrieve the token of the separator
         square_braket_open_token = tokenizer.convert_tokens_to_ids("[")  # retrieve the token of the separator
         square_braket_close_token = tokenizer.convert_tokens_to_ids("]")  # retrieve the token of the separator
         comma_token= tokenizer.convert_tokens_to_ids(",")  # retrieve the token of the separator
         
-
-        #print("header token id", header_token_id)
-        #Identify token positions for each tuple
+        #define the positions of the tuples
         tuple_end_positions = ((input_ids == tuple_end_token_id) | (input_ids == header_token_id)).nonzero(as_tuple=True)[1]
-
-
-
-
         tuple_ranges = []
         start = 0
         tuple_lengths=[]
@@ -152,8 +145,8 @@ class FinchPressKeepStructuralTokensForTSHAvg(BasePress):
         
         batch_top_indices=top_indices[0]
 
-        head_kept_token_sets = batch_top_indices.tolist()
-        head_kept_tuple_indices = set()  # check the tokens already stored
+        head_kept_token_sets = batch_top_indices.tolist() #tokens that are important 
+        head_kept_tuple_indices = set()  
 
         important_tokens = head_kept_token_sets
         current_num_tokens = 0
@@ -162,101 +155,77 @@ class FinchPressKeepStructuralTokensForTSHAvg(BasePress):
 
         tuples_inserted=set()
 
-        #print the first parenthesis
-        #print("decoded full: "  + tokenizer.decode(input_ids[0,:], skip_special_tokens=False))
+        
 
-        #find the first parenthesis!
+        #find the first opening parenthesis and header tokens
         first_parenthesis_index=-1
         header_start_index=-1
         header_end_index=-1
+
         for i in range (len(input_ids[0])):
-            #print(tokenizer.decode(input_ids[0,i], skip_special_tokens=False))
             if input_ids[0,i] == square_braket_open_token and first_parenthesis_index==-1:
                 first_parenthesis_index=i
-                #print("found first parenthesis at position: ", i)
             elif input_ids[0,i] == header_token_id and header_start_index==-1:
                 header_start_index=i
-                #print("found first header at position: ", i)
             elif input_ids[0,i] == header_token_id and header_start_index!=-1:
                 header_end_index=i
-                #print("found second header at position: ", i)
                 break
 
+        #find last closing parenthesis
         last_parenthesis_index=-1
         for i in range (len(input_ids[0])-1,-1,-1):
             if input_ids[0,i] == square_braket_close_token:
                 last_parenthesis_index=i
-                #print("found last parenthesis at position: ", i)
                 break
 
+        #add parenthesis and header to selected tokens
         head_kept_tuple_indices.update([first_parenthesis_index, last_parenthesis_index]) 
         head_kept_tuple_indices.update(range(header_start_index, header_end_index+1))  # add the header tokens 
-        current_num_tokens += 2  # we added two tokens, the first and the last parenthesis
-        
-        special_tokens_not_to_save=(tuple_end_token_id, square_braket_open_token, square_braket_close_token, comma_token)  # special tokens not to save
 
-        selected = [input_ids[0,i] for i in sorted(head_kept_tuple_indices)]
-        print("selected tokens: ", sorted(head_kept_tuple_indices))
-        print("final tokens of header: ",tokenizer.decode(selected, skip_special_tokens=False))
-        print("header position: ", header_end_index)
+        current_num_tokens =len(head_kept_tuple_indices)  
+        
+        #save special toens to ignore among the most important ones
+        special_tokens_not_to_save=(tuple_end_token_id, square_braket_open_token, square_braket_close_token, comma_token)
+        
+
+        #iterate over most important tokens
         for token in important_tokens:
             if current_num_tokens >= n_kept_context:
                 break
-
-            if module.layer_idx == 3:
-                print("new important token: ",token, "decoded as: ", tokenizer.decode(input_ids[0,token], skip_special_tokens=False))
-            
             
             if input_ids[0, token] in special_tokens_not_to_save or token in range(header_start_index, header_end_index+1):  # skip special tokens
-                if module.layer_idx == 3:
-                    print("SKIP")
+                #skip if the token is a special token or in the header
                 continue
+
             i=0
             for start, end in tuple_ranges: #iterate over tuples and find the tuple the token is in
                 if start <= token < end:  # check if the token is in the tuple
                     if token<= first_parenthesis_index:
-                        if module.layer_idx == 3: 
-                            print("token is in the header, skip",token,  header_end_index)
-                        to_add=[token]
+                        #token is before table, do not look for parenthesis
+                        to_add=[token] 
                     else:
-                        if module.layer_idx == 3:
-                            print("token is not header", token , header_end_index)
-                            print(f"token {token} is in tuple: ", start, end, i)
+                        #token is inside table, look for parenthesis
                         to_add=[start,token,end-3]
 
-                    if input_ids[0,token+1]== comma_token: 
+                    if input_ids[0,token+1] == comma_token:
+                        #keep commas if there are 
                         to_add.append(token+1)
 
+                    #update kept tokens
                     head_kept_tuple_indices.update(to_add)
-                    added_tokens= [input_ids[0,i] for i in to_add]
-                    if module.layer_idx == 3:
-                        
-                        print("added token: ", tokenizer.decode(added_tokens, skip_special_tokens=False), "at position; ", token)
-
                     
 
-                    if i in tuples_inserted or token<=header_end_index:  # if the tuple was already inserted or the token is in the header, skip
+                    #update number of token added, consider case in which parenthesis were already taken
+                    if i in tuples_inserted or token<=header_end_index:  
                         current_num_tokens+=1
                     else:
                         current_num_tokens += 3
                         tuples_inserted.add(i)
-                    
-                        #print("right after token: ", tokenizer.decode(input_ids[0,token+1], skip_special_tokens=False))
-                        #print("added_token: ", tokenizer.decode(input_ids[0,token], skip_special_tokens=False))
-                        #ids_added=[input_ids[0,start], input_ids[0,token], input_ids[0,end-3]]
-                        #print("decoded tuple inserted : ", tokenizer.decode(ids_added, skip_special_tokens=False))
-                        #print( "whole tuple: ", tokenizer.decode(input_ids[0,start:end], skip_special_tokens=False))
-                        #print("print current tokens: ", current_num_tokens)
-        print("FINISHED")
+
         
 
         #transform it back to a list of sets
         head_kept_tuple_indices = [sorted(list(head_kept_tuple_indices)) for _ in range(3)]
-
-        selected = [input_ids[0,i] for i in head_kept_tuple_indices[0]]
-        print("selected tokens: ", head_kept_tuple_indices[0])
-        print("final tokens: ",tokenizer.decode(selected, skip_special_tokens=False))
-        
         head_kept_tuple_indices = torch.tensor(head_kept_tuple_indices)
         indices_context = head_kept_tuple_indices.unsqueeze(0).expand(self.split_size, -1, -1)
 
