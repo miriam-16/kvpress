@@ -126,19 +126,21 @@ class FinchPressTSHavg(BasePress):
 
         input_ids = self.current_input_ids  # shape: (seq_len,)
         tokenizer = self.tokenizer
+        
         tuple_end_token_id = tokenizer.convert_tokens_to_ids("<tuple_end>") #retrieve the token of the separator
+        header_token_id= tokenizer.convert_tokens_to_ids("<header>")
 
         #Identify token positions for each tuple
-        tuple_end_positions = (input_ids == tuple_end_token_id).nonzero(as_tuple=True)[1]
+        tuple_end_positions = ((input_ids == tuple_end_token_id) | (input_ids == header_token_id)).nonzero(as_tuple=True)[1]
 
 
         tuple_ranges = []
         start = 0
         tuple_lengths=[]
         for end in tuple_end_positions:
-            tuple_ranges.append((start, end.item() + 1))  # include <tuple_end>
+            tuple_ranges.append((start, end.item()))  # include <tuple_end>
             #compute the length of the tuple
-            tuple_lengths.append(end.item() - start + 1)  # length of the tuple
+            tuple_lengths.append(end.item() - start)  # length of the tuple
             start = end.item() + 1
 
             
@@ -188,10 +190,14 @@ class FinchPressTSHavg(BasePress):
                 elif current_num_tokens<n_kept_context:
                     tokens_needed = n_kept_context - current_num_tokens
 
-                    tuples_inserted.add(index_of_tuple_to_keep)
-                    head_kept_tuple_indices.update(range(start, start + tokens_needed))
+                    #add closing paranthesis
+                    closing_parenthesis_position=end-2 if index_of_tuple_to_keep!=1 else end-1
+                    head_kept_tuple_indices.add(closing_parenthesis_position)
+
+                    head_kept_tuple_indices.update(range(start, start + tokens_needed-1))
                     current_num_tokens += tokens_needed
 
+                    tuples_inserted.add(index_of_tuple_to_keep)
                     #print("added partial: ",index_of_tuple_to_keep, "range: ", start, start + tokens_needed)
 
                     break
@@ -200,18 +206,17 @@ class FinchPressTSHavg(BasePress):
             if current_num_tokens==n_kept_context:
                     break
     
-            #print("current_num_tokens: ", current_num_tokens)
-            #print(len(tuples_inserted))
-            #print("___________________________________________________")
-
-        
-        #print("final number of tokens: ",current_num_tokens)
-        #print("final_len: ",head_kept_tuple_indices[head])
-        
-        print("FINISHED")
 
         #transform it back to a list of sets
         head_kept_tuple_indices = [sorted(list(head_kept_tuple_indices)) for _ in range(3)]
+
+        if module.layer_idx == 25:
+            print("DEBUG")
+            for i, head_kept_tuple_indice in enumerate(head_kept_tuple_indices):
+                print(f"*******head {i} result:********* ")
+                decoded= tokenizer.batch_decode(input_ids[0,head_kept_tuple_indice], skip_special_tokens=False)
+                print("decoded tokens: ", "".join(decoded))
+
         
         head_kept_tuple_indices = torch.tensor(head_kept_tuple_indices)
         indices_context = head_kept_tuple_indices.unsqueeze(0).expand(self.split_size, -1, -1)
@@ -229,8 +234,6 @@ class FinchPressTSHavg(BasePress):
         ].expand(scores.shape[0], scores.shape[1], -1)
         indices_context, _ = torch.sort(indices_context, dim=-1)
 
-        print("indices_context shape: ", indices_context.shape)
-        print("indices_condition shape: ", indices_condition.shape)
 
         # concatenate the indices
         indices = torch.cat([indices_context, indices_condition], dim=-1)
