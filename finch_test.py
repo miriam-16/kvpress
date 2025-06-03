@@ -7,8 +7,9 @@ from kvpress import FinchPress, KeyRerotationPress, SnapKVPress, FinchPressTSNai
 
 
 
-context =  '[<header>["Rank","Cyclist","Team","Time","UCI ProTour\nPoints"]<header>["1","Alejandro Valverde (ESP)","Caisse d\'Epargne","5h 29\' 10"","40"]<tuple_end>["2","Alexandr Kolobnev (RUS)","Team CSC Saxo Bank","s.t.","30"]<tuple_end>["3","Davide Rebellin (ITA)","Gerolsteiner","s.t.","25"]<tuple_end>["4","Paolo Bettini (ITA)","Quick Step","s.t.","20"]<tuple_end>["5","Franco Pellizotti (ITA)","Liquigas","s.t.","15"]<tuple_end>["6","Denis Menchov (RUS)","Rabobank","s.t.","11"]<tuple_end>["7","Samuel Sánchez (ESP)","Euskaltel-Euskadi","s.t.","7"]<tuple_end>["8","Stéphane Goubert (FRA)","Ag2r-La Mondiale","+ 2"","5"]<tuple_end>["9","Haimar Zubeldia (ESP)","Euskaltel-Euskadi","+ 2"","3"]<tuple_end>["10","David Moncoutié (FRA)","Cofidis","+ 2"","1"]<tuple_end>]'
-question= "Question:which country had the most cyclists finish within the top 10?"
+context =  '[<header>["Year","Film","Role","Language","Notes"]<header>["2008","Moggina Manasu","Chanchala","Kannada","Filmfare Award for Best Actress - Kannada\nKarnataka State Film Award for Best Actress"]<tuple_end>["2009","Olave Jeevana Lekkachaara","Rukmini","Kannada","Innovative Film Award for Best Actress"]<tuple_end>["2009","Love Guru","Kushi","Kannada","Filmfare Award for Best Actress - Kannada"]<tuple_end>["2010","Krishnan Love Story","Geetha","Kannada","Filmfare Award for Best Actress - Kannada\nUdaya Award for Best Actress"]<tuple_end>["2010","Gaana Bajaana","Radhey","Kannada",""]<tuple_end>["2011","Hudugaru","Gayithri","Kannada","Nominated, Filmfare Award for Best Actress – Kannada"]<tuple_end>["2012","Alemari","Neeli","Kannada",""]<tuple_end>["2012","Breaking News","Shraddha","Kannada",""]<tuple_end>["2012","Addhuri","Poorna","Kannada","Udaya Award for Best Actress\nNominated — SIIMA Award for Best Actress\nNominated — Filmfare Award for Best Actress – Kannada"]<tuple_end>["2012","18th Cross","Punya","Kannada",""]<tuple_end>["2012","Sagar","Kajal","Kannada",""]<tuple_end>["2012","Drama","Nandini","Kannada",""]<tuple_end>["2013","Kaddipudi","Uma","Kannada",""]<tuple_end>["2013","Dilwala","Preethi","Kannada",""]<tuple_end>["2013","Bahaddoor","Anjali","Kannada","Filming"]<tuple_end>["2014","Mr. & Mrs. Ramachari","","","Announced"]<tuple_end>["2014","Endendigu","","","Filming"]<tuple_end>]'
+question= '''
+Question:what is the total number of films with the language of kannada listed?'''
 
 model_name= "HuggingFaceTB/SmolLM-135M-Instruct"
 device="cpu"
@@ -22,7 +23,7 @@ print("MODEL LOADED")
 
 
 
-press= FinchPressTSNaive(compression_ratio=0.8, split_size=1)
+press= FinchPressTCSNaive(compression_ratio=0.8, split_size=1)
 
 #press=SnapKVPress(compression_ratio=0.1,window_size=3)
 answer = pipe(context, question=question, press=press)["answer"]

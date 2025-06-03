@@ -117,32 +117,30 @@ class FinchPressTCSNaive(BasePress):
         input_ids = self.current_input_ids  # shape: (seq_len,)
         tokenizer = self.tokenizer
         tuple_end_token_id = tokenizer.convert_tokens_to_ids("<tuple_end>") #retrieve the token of the separator
+        header_token_id= tokenizer.convert_tokens_to_ids("<header>")
+
 
         #Identify token positions for each tuple
-        tuple_end_positions = (input_ids == tuple_end_token_id).nonzero(as_tuple=True)[1]
-
+        tuple_end_positions = ((input_ids == tuple_end_token_id) | (input_ids == header_token_id)).nonzero(as_tuple=True)[1]
 
         tuple_ranges = []
         start = 0
         tuple_lengths=[]
         for end in tuple_end_positions:
-            tuple_ranges.append((start, end.item() + 1))  # include <tuple_end>
+            tuple_ranges.append((start, end.item()))  # include <tuple_end>
             #compute the length of the tuple
-            tuple_lengths.append(end.item() - start + 1)  # length of the tuple
+            tuple_lengths.append(end.item() - start)  # length of the tuple
 
             start = end.item() + 1
 
-            
         #compute the average length of the tuples: 
 
         #print(tuple_lengths)
         avg_tuple_length = sum(tuple_lengths) / len(tuple_lengths) if tuple_lengths else 0
 
-        print("average tuple length: ",avg_tuple_length)
 
         k = scores.shape[-1] - self.condition_len
         top_indices = scores[:, :, :-self.condition_len].topk(k, dim=-1).indices
-
         #top_indices = scores[:, :, :-self.condition_len].topk(n_kept_context, dim=-1).indices  #get the top indices
         
         batch_top_indices=top_indices[0]
@@ -151,180 +149,133 @@ class FinchPressTCSNaive(BasePress):
         head_kept_token_sets = [batch_top_indices[head].tolist() for head in range(num_heads)]
         head_kept_tuple_indices = [set() for _ in range(num_heads)]  # which token positions to keep per head
 
+        special_tokens_not_to_save=(tuple_end_token_id, header_token_id)
 
         # Iterate over the important tokens and assign them to the corresponding 
-        
-        if module.layer_idx == 0:
+        for head in range(num_heads):
+            important_tokens = head_kept_token_sets[head]      
+            tuples_inserted=set()
+            current_num_tokens = 0
+            columns_inserted=set() #to keep track of the columns inserted
 
-            for head in range(num_heads):
+            #add header always
+            start_header, end_header = tuple_ranges[1]
+            head_kept_tuple_indices[head].update(range(start_header, end_header))  
+            tuples_inserted.add(1)
+            current_num_tokens += end_header - start_header  
+    
+            for token in important_tokens:
+                if len(head_kept_tuple_indices[head]) >= n_kept_context:
+                    #stop if we reached the limit
+                    break
 
-                print("******new head*******", head)
-                important_tokens = head_kept_token_sets[head]
-                tuples_inserted=set()
-                current_num_tokens = 0
-                columns_inserted=set() #to keep track of the columns inserted
 
-                print("important tokens: ", important_tokens)
+                if input_ids[0,token] in special_tokens_not_to_save:
+                    #do not save special tokens
+                    continue
 
-                for token in important_tokens:
+                index_of_tuple_to_keep=int(token/avg_tuple_length)
 
-                    #break if reached maximum number of tokens to keep
-                    if current_num_tokens>=n_kept_context:
-                        break
-                    
-                    print("token: ", token)
-                    
-                    index_of_tuple_to_keep=int(token/avg_tuple_length)
+                #check if we are considering last tuple, aviod errors
+                if index_of_tuple_to_keep>=len(tuple_ranges):
+                    index_of_tuple_to_keep=len(tuple_ranges)-1
 
-                    #check if we are considering last tuple, aviod errors
-                    if index_of_tuple_to_keep>=len(tuple_ranges):
-                        index_of_tuple_to_keep=len(tuple_ranges)-1
+                if index_of_tuple_to_keep not in tuples_inserted: # add only if not already added
+                    tuple_to_consider=tuple_ranges[index_of_tuple_to_keep]
+                    start, end = tuple_to_consider
 
-                    print("index_of_tuple_to_keep: ", index_of_tuple_to_keep)
-                    
-                    if index_of_tuple_to_keep not in tuples_inserted:
-                        tuple_to_consider=tuple_ranges[index_of_tuple_to_keep]
-                        start, end = tuple_to_consider
+                    #consider the tuple to add and consider the actual new elements
+                    indices_set= set(range(start, end))  
+                    common = head_kept_tuple_indices[head] & indices_set  #compute intersection
+                    #remove common elements from the set 
+                    to_add = len(indices_set)-len(common)
+                    indices_set = indices_set - common
 
-                        tuple_size = end - start
-                        if current_num_tokens + tuple_size <= n_kept_context:
-                            head_kept_tuple_indices[head].update(range(start, end))
-                            current_num_tokens += tuple_size
-                            print("added full tuple: ",index_of_tuple_to_keep, "range: ", start, end)
-                            tuples_inserted.add(index_of_tuple_to_keep)
-                        elif current_num_tokens<n_kept_context:
-                            tokens_needed = n_kept_context - current_num_tokens
-                            print("added partial tuple: ",index_of_tuple_to_keep, "range: ", start, start + tokens_needed)
-                            head_kept_tuple_indices[head].update(range(start, start + tokens_needed))
-                                
-                            current_num_tokens += tokens_needed
-                    
-                            tuples_inserted.add(index_of_tuple_to_keep)
+                    if len(head_kept_tuple_indices[head]) + to_add <= n_kept_context: #add everything if possible
+                        head_kept_tuple_indices[head].update(range(start, end))
+                        current_num_tokens += to_add
+                        #print("added full: ",index_of_tuple_to_keep, "range: ", start, end)
+                        tuples_inserted.add(index_of_tuple_to_keep)
 
-                            break
+                    elif len(head_kept_tuple_indices[head])<n_kept_context:
+                        tokens_needed = n_kept_context - len(head_kept_tuple_indices[head]) #compute the tokens needed to reach the limit
                         
-                        #move to column selcection
-                        #compute the index of the tuple: 
+                        #add closing parenthesis to keep structure
+                        closing_parenthesis_position=end-2 if index_of_tuple_to_keep!=1 else end-1
+                        head_kept_tuple_indices[head].add(closing_parenthesis_position)
 
-                        tuple_idx = None
-                        token_offset = None
-                        #compute approximate tuple containinng the token 
-                        approx_tuple_idx= int(token / avg_tuple_length)
-                        print("approx_tuple_idx: ", approx_tuple_idx)
-
-                        start_checking=max( 0, approx_tuple_idx - 1) #check also previous tuple 
-                        end_checking=min(len(tuple_ranges), approx_tuple_idx + 2) #check also next tuple 
-
-                        #slice the tuple ranges to check only the relevant tuples
-                        tuple_ranges_to_check = tuple_ranges[start_checking:end_checking]
-
-                        tuple_idx=start_checking
-                        for (start, end) in tuple_ranges_to_check:
-                            if start <= token < end:
-                                token_offset = token - start
-                                break
-                            tuple_idx += 1
-
-                        if token_offset is not None and token_offset not in columns_inserted:
-                            print("found a column for tuple: ", token_offset)
-                            #add the tokens in that column
-                            for i in range(0,len(tuple_ranges)):
-                                if current_num_tokens>=n_kept_context:
-                                    break
-
-                                if i * avg_tuple_length + token_offset not in head_kept_tuple_indices[head]:
-                                    print("add element : ", int(i * avg_tuple_length + token_offset))
-                                    
-                                    head_kept_tuple_indices[head].add(int(i * avg_tuple_length + token_offset))
-                                    columns_inserted.add(token_offset)
-                                    current_num_tokens += 1
-
-                    print("current_num_tokens: ", current_num_tokens)
-                    print(len(tuples_inserted))
-                    print("___________________________________________________")
-
+                        #add rest, select first k elements of indices_set
+                        tokens_needed_again = n_kept_context - len(head_kept_tuple_indices[head])
+                        head_kept_tuple_indices[head].update(sorted(list(indices_set))[:tokens_needed_again])    
+                        current_num_tokens += tokens_needed
                 
-                print("final number of tokens: ", current_num_tokens)
-                print("final_len: ", head_kept_tuple_indices[head])
-        else:
-            for head in range(num_heads):
-                important_tokens = head_kept_token_sets[head]
-                tuples_inserted=set()
-                current_num_tokens = 0
-                columns_inserted=set() #to keep track of the columns inserted
+                        tuples_inserted.add(index_of_tuple_to_keep)
 
-                for token in important_tokens:
+                    
+                #** MOVE TO COLUMN SELECTION**
+               
 
-                    #break if reached maximum number of tokens to keep
-                    if current_num_tokens>=n_kept_context:
+                tuple_idx = None
+                token_offset = None
+                #compute approximate tuple containing the token 
+                approx_tuple_idx= int(token / avg_tuple_length)
+
+
+                #OPTIONAL, IF WANNA AVOID CHECK ALL THE TUPLES
+                start_checking=max( 0, approx_tuple_idx - 1) #check also previous tuple 
+                end_checking=min(len(tuple_ranges), approx_tuple_idx + 1) #check also next tuple 
+                tuple_idx=start_checking
+
+                #slice the tuple ranges to check only the relevant tuples
+                tuple_ranges_to_check = tuple_ranges
+
+                # STORE ALREADY ADDED PARENTHESIS
+                parenthesis_added=set()
+
+                for i,(start, end) in enumerate(tuple_ranges_to_check):
+                    if start <= token < end:
+                        token_offset = token - start
                         break
-                    
-                    index_of_tuple_to_keep=int(token/avg_tuple_length)
+                    tuple_idx += 1
 
-                    #check if we are considering last tuple, aviod errors
-                    if index_of_tuple_to_keep>=len(tuple_ranges):
-                        index_of_tuple_to_keep=len(tuple_ranges)-1
-                    
-                    if index_of_tuple_to_keep not in tuples_inserted:
-                        tuple_to_consider=tuple_ranges[index_of_tuple_to_keep]
-                        start, end = tuple_to_consider
-
-                        tuple_size = end - start
-                        if current_num_tokens + tuple_size <= n_kept_context:
-                            head_kept_tuple_indices[head].update(range(start, end))
-                            current_num_tokens += tuple_size
-                            tuples_inserted.add(index_of_tuple_to_keep)
-                        elif current_num_tokens<n_kept_context:
-                            tokens_needed = n_kept_context - current_num_tokens
-                            head_kept_tuple_indices[head].update(range(start, start + tokens_needed))
-                                
-                            current_num_tokens += tokens_needed
-                    
-                            tuples_inserted.add(index_of_tuple_to_keep)
-
+                if token_offset is not None and token_offset not in columns_inserted:  
+                    #add the tokens if found and column not already considered 
+                    for i,(start_t,end_t) in enumerate(tuple_ranges):
+                        if len( head_kept_tuple_indices[head])>=n_kept_context:
                             break
-                        
-                        #move to column selcection
-                        #compute the index of the tuple: 
 
-                        tuple_idx = None
-                        token_offset = None
-                        #compute approximate tuple containinng the token 
-                        approx_tuple_idx= int(token / avg_tuple_length)
+                        if i==0 or i==1:
+                            #simply add the token, do not consider parenthesis. Header should not be added
+                            if token_offset not in head_kept_tuple_indices[head]:
+                                head_kept_tuple_indices[head].add(token_offset)
+                                current_num_tokens += 1 
+                            continue
 
-                        start_checking=max( 0, approx_tuple_idx - 1) #check also previous tuple 
-                        end_checking=min(len(tuple_ranges), approx_tuple_idx + 2) #check also next tuple 
 
-                        #slice the tuple ranges to check only the relevant tuples
-                        tuple_ranges_to_check = tuple_ranges[start_checking:end_checking]
+                        #add parenthesis only if not already added
+                        if start_t not in head_kept_tuple_indices[head] and end_t-2 not in head_kept_tuple_indices[head]:
+                            head_kept_tuple_indices[head].update([start_t,end_t-1 if i==1 else end_t-2])
+                            current_num_tokens += 2 
+                            parenthesis_added.update([start_t,end_t-1 if i==1 else end_t-2])
 
-                        tuple_idx=start_checking
-                        for (start, end) in tuple_ranges_to_check:
-                            if start <= token < end:
-                                token_offset = token - start
-                                break
-                            tuple_idx += 1
-
-                        if token_offset is not None and token_offset not in columns_inserted:
-                            #add the tokens in that column
-                            for i in range(0,len(tuple_ranges)):
-                                if current_num_tokens>=n_kept_context:
-                                    break
-
-                                if i * avg_tuple_length + token_offset not in head_kept_tuple_indices[head]:
-                                    
-                                    head_kept_tuple_indices[head].add(int(i * avg_tuple_length + token_offset))
-                                    columns_inserted.add(token_offset)
-                                    current_num_tokens += 1
-        
-            
-        print("FINISHED")
+                        #add actual token if not already added, can be optimized
+                        if int(i * avg_tuple_length + token_offset) not in head_kept_tuple_indices[head]:  
+                            head_kept_tuple_indices[head].add(int(i * avg_tuple_length + token_offset))
+                            columns_inserted.add(token_offset)
+                            current_num_tokens += 1
 
         head_kept_tuple_indices = [sorted(list(kept_tokens)) for kept_tokens in head_kept_tuple_indices]
 
-        head_kept_tuple_indices = torch.tensor(head_kept_tuple_indices)
-        print(head_kept_tuple_indices.shape)
-        indices_context = head_kept_tuple_indices.unsqueeze(0).expand(self.split_size, -1, -1)
+
+        try:
+            head_kept_tuple_indices = torch.tensor(head_kept_tuple_indices)
+            indices_context = head_kept_tuple_indices.unsqueeze(0).expand(self.split_size, -1, -1)
+        except Exception as e:
+            print(f"dimensions don't match at layer {module.layer_idx}")
+            for i, head_kept_tuple_idx in enumerate(head_kept_tuple_indices):
+                print(len(head_kept_tuple_idx), "tokens kept in head ", i, ":", head_kept_tuple_idx)
+            #throw exception
+            raise e
 
         #_______________________________________________________________#
         #END OF NEW PART
